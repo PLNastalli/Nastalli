@@ -7,7 +7,7 @@ on:
 
 jobs:
   checks:
-    name: Format, tests and clippy
+    name: Format, tests, clippy and boot smoke test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,3 +26,29 @@ jobs:
         run: cargo clippy -p nastalli-arch -p nastalli-hal -p nastalli-kernel -p xtask -- -D warnings
       - name: Build kernel
         run: cargo xtask build
+      - name: Install QEMU and OVMF
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-system-x86 ovmf
+      - name: Smoke test kernel boot
+        shell: bash
+        run: |
+          set -o pipefail
+          set +e
+          timeout 10s env NASTALLI_QEMU_DISPLAY=none cargo xtask run 2>&1 | tee qemu.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ $status -ne 0 && $status -ne 124 ]]; then
+            echo "QEMU smoke test exited unexpectedly with status $status"
+            exit "$status"
+          fi
+
+          grep -F "NASTALLI OS v0.0.7" qemu.log
+          grep -F "Scheduler initialized: round-robin, 5 tick quantum." qemu.log
+          grep -F "Scheduler timer active: first PIT tick observed." qemu.log
+
+          if grep -Fq "kernel panic:" qemu.log; then
+            echo "Kernel panic detected during QEMU smoke test"
+            exit 1
+          fi
