@@ -1,141 +1,204 @@
-# Histórico técnico
+# Technical Progress History
 
-Este arquivo registra o que foi implementado, por que foi implementado e quais evidências existem. Cada versão deve ser concluída antes do início da seguinte.
+This file records what was implemented, why it was implemented, and what evidence exists for each milestone. Planned behavior belongs in [`roadmap.md`](roadmap.md); this document is evidence-oriented and should describe only work that actually happened.
 
-## Manutenção arquitetural após a v0.0.6
+## Maintenance after v0.0.6
 
-- O workspace foi atualizado para `resolver = "3"`, acompanhando a Edition 2024.
-- `kernel::start()` agora coordena apenas a sequência de alto nível e delega banner, plataforma, memória, tarefas, framebuffer e loop para funções pequenas.
-- A `TaskTable` deixa de ser temporária: `initialize_tasks()` devolve a tabela e transfere sua posse para o runtime longo do kernel, preparando o estado persistente que o scheduler consumirá.
-- Foi adicionado um teste de regressão para confirmar que o bootstrap produz exatamente uma tarefa.
-- O framebuffer continua direto no fluxo de boot porque ainda não há um segundo consumidor que justifique `framebuffer → console`.
-- O HAL permanece limitado às abstrações com uso concreto: serial e teclado.
-- O toolchain passou a declarar `rust-src` e `llvm-tools-preview`; o CI também instala esses componentes porque `bootloader 0.11.10` precisa das ferramentas LLVM durante seu build.
+### Runtime and CI foundation
 
-Essa manutenção não cria uma nova versão funcional; corrige a vida útil do estado de tarefas e alinha o ambiente local ao CI antes da implementação do scheduler.
+After `v0.0.6`, several maintenance changes were made without creating a new functional kernel release:
 
-## v0.0.6 — Estrutura de tarefas
+- the Cargo workspace was updated to `resolver = "3"` for Edition 2024;
+- `kernel::start()` was reduced to high-level orchestration and delegates banner, platform, memory, task, framebuffer, and runtime-loop work to smaller initialization functions;
+- the `TaskTable` stopped being temporary: `initialize_tasks()` returns the table and moves ownership into the long-running kernel runtime;
+- a regression test was added to confirm that bootstrap-state construction produces exactly one task;
+- framebuffer painting remains directly in the boot flow because a second real consumer does not yet justify a separate `framebuffer -> console` abstraction;
+- the HAL remains limited to abstractions with concrete consumers, currently serial and keyboard input;
+- the Rust toolchain declaration now includes `rust-src` and `llvm-tools-preview`;
+- CI also installs the LLVM tools because `bootloader 0.11.10` requires them during its build.
 
-### Objetivo
+The first public CI runs failed before host tests completed because LLVM tools were unavailable. The failure was confirmed in GitHub Actions logs as:
 
-Criar um contrato mínimo para identidade e estado de tarefas sem iniciar ainda scheduler, troca de contexto ou userspace.
+```text
+failed to get llvm tools: NotFound
+```
 
-### Implementado
+After `llvm-tools-preview` was added to the toolchain/CI environment, the corrected CI run completed successfully.
 
-- `crates/kernel/src/task.rs` com `TaskId`, `TaskState`, `Task` e `TaskTable`.
-- Tabela fixa de 16 tarefas, sem alocação dinâmica.
-- IDs monotônicos e operações explícitas de criação, consulta e mudança de estado.
-- Tarefa bootstrap criada durante a inicialização e marcada como `Running` apenas de forma descritiva.
-- A tabela criada no boot permanece viva no runtime do kernel por ownership explícito, sem singleton/global.
-- Testes para criação, transição de estado, capacidade, tarefas ausentes e construção da tabela bootstrap.
-- Documentação dedicada em `docs/tasks.md`.
+### Documentation and project presentation
 
-### Limites
+The public repository documentation was later professionalized without changing the functional kernel version:
 
-- O PIT continua configurado, mas a IRQ0 permanece mascarada.
-- Ainda não há scheduler, preempção, contexto salvo, stack própria ou processos.
+- public documentation was converted to English-first;
+- the README was rewritten around current capabilities, explicit experimental status, build/run instructions, architecture, and engineering principles;
+- architecture documentation now separates the current `v0.0.6` implementation from long-term target layers;
+- the roadmap was expanded from short bring-up milestones into an evidence-based maturity path through `v1.0.0` and beyond;
+- `v1.0.0` was defined as a production-grade baseline for explicitly supported configurations rather than a claim of universal Windows/Linux-level hardware compatibility;
+- future hardware support is described through explicit Tier 1/Tier 2/Tier 3/unsupported categories;
+- contribution, security, subsystem, and unsafe-code documentation was rewritten in professional English while preserving current implementation facts;
+- a design record and implementation plan were added under `docs/superpowers/` for the documentation overhaul.
 
-### Verificação
+This documentation work does not mark future roadmap features as implemented and does not advance the kernel beyond `v0.0.6`.
 
-- `cargo fmt --all -- --check`: aprovado localmente antes da manutenção.
-- `cargo xtask test`: testes do modelo de tarefas e demais crates aprovados localmente antes da manutenção.
-- `cargo check` dos crates aplicáveis: aprovado localmente antes da manutenção.
-- `cargo clippy ... -- -D warnings`: aprovado localmente antes da manutenção.
-- `cargo xtask build`: kernel x86_64 compilado localmente.
-- `cargo xtask run` com QEMU + OVMF: boot aprovado.
-- Saída observada: `NASTALLI OS v0.0.6`, `Physical memory: 30269 usable frames.` e `Task table initialized: 1 task.`
-- O primeiro CI público falhava antes dos testes por ausência de `llvm-tools-preview`; a causa foi confirmada nos logs como `failed to get llvm tools: NotFound` e o workflow foi corrigido.
-- O QEMU foi encerrado por timeout controlado após a validação, pois o kernel permanece em loop infinito.
+---
 
-## v0.0.5 — Teclado PS/2
+## v0.0.6 — Task structure
 
-### Objetivo
+### Goal
 
-Capturar teclas básicas no QEMU por IRQ1, mantendo o handler curto e separando leitura de hardware da decodificação.
+Create a minimal contract for task identity and task state without introducing a scheduler, context switching, or userspace yet.
 
-### Implementado
+### Implemented
 
-- `arch::keyboard` com leitura da porta `0x60` e armazenamento atômico do último scancode.
-- Handler de teclado no vetor IRQ1 após remapeamento do PIC.
-- IRQ1 (teclado) desbloqueada no PIC; IRQ0 permanece mascarada até o scheduler.
-- `hal::keyboard` com decodificação de scancodes Set 1 para oito teclas básicas.
-- Kernel registra teclas decodificadas pela serial.
-- Testes de tecla pressionada e liberação ignorada.
-- Documentação dedicada em `docs/input.md`.
+- `crates/kernel/src/task.rs` with `TaskId`, `TaskState`, `Task`, and `TaskTable`;
+- fixed table capacity of 16 tasks without dynamic storage policy;
+- monotonic task IDs;
+- explicit create, lookup, and state-update operations;
+- bootstrap task created during initialization and marked `Running` as descriptive state only;
+- bootstrap table kept alive by explicit ownership in the kernel runtime rather than a singleton/global;
+- tests covering creation, monotonic IDs, state transitions, capacity, missing tasks, and bootstrap-state construction;
+- dedicated documentation in [`tasks.md`](tasks.md).
 
-### Decisões
+### Limits
 
-- O contexto da interrupção não aloca, formata nem chama código de alto nível.
-- O buffer de um único evento é suficiente para validar o hardware; fila e backpressure ficam para quando houver tarefas.
-- USB e layouts complexos não entram nesta versão.
+- PIT infrastructure exists, but IRQ0 remains masked in the current runtime;
+- there is no scheduler;
+- there is no preemption;
+- there is no saved CPU context model;
+- tasks do not yet own independent stacks;
+- there are no processes or userspace execution.
 
-### Verificação
+### Verification
 
-- Testes do HAL: 2 testes de scancode passaram.
-- `cargo check` dos crates aplicáveis: aprovado.
-- `cargo clippy` com `-D warnings`: aprovado.
-- `cargo xtask build`: kernel x86_64 compilado.
-- `cargo xtask run` no QEMU + OVMF: boot aprovado.
-- Saída observada: `NASTALLI OS v0.0.5`, `IDT and keyboard IRQ1 initialized.`, `Keyboard input initialized on IRQ1.` e `Physical memory: 30296 usable frames.`
-- O QEMU foi encerrado por timeout controlado após a validação, pois o kernel permanece em loop infinito.
+Before the post-v0.0.6 maintenance work, local verification recorded:
 
-## v0.0.4 — Heap do kernel
+- `cargo fmt --all -- --check`: passed;
+- `cargo xtask test`: task-model tests and applicable crate tests passed;
+- applicable `cargo check`: passed;
+- `cargo clippy ... -- -D warnings`: passed;
+- `cargo xtask build`: x86_64 kernel build succeeded;
+- `cargo xtask run` with QEMU + OVMF: boot validated.
 
-### Objetivo
+Observed output included:
 
-Disponibilizar uma heap inicial, pequena e estável para futuras APIs que precisem de alocação, sem introduzir paginação dinâmica ou heap de userspace.
+```text
+NASTALLI OS v0.0.6
+Physical memory: 30269 usable frames.
+Task table initialized: 1 task.
+```
 
-### Implementado
+QEMU was stopped by a controlled timeout after validation because the kernel intentionally remains in an infinite runtime loop.
 
-- `crates/kernel/src/heap.rs` com heap estática alinhada de 64 KiB.
-- `linked_list_allocator::LockedHeap` como allocator global.
-- Inicialização explícita no fluxo do kernel.
-- Teste unitário da regra de alinhamento.
-- Documentação dedicada em `docs/heap.md`.
+---
 
-### Decisões
+## v0.0.5 — PS/2 keyboard input
 
-- A heap usa memória estática para não depender de paginação própria nesta etapa.
-- O `FrameAllocator` continua separado; ele será usado para crescimento da heap somente quando o kernel controlar suas próprias tabelas de páginas.
-- Não há API de alocação customizada nem abstração de ownership prematura.
+### Goal
 
-### Verificação
+Capture basic keyboard input under QEMU through IRQ1 while keeping the interrupt handler small and separating hardware access from scancode decoding.
 
-- Teste unitário da heap: passou.
-- `cargo check` e `cargo clippy` dos crates aplicáveis: passaram.
-- Build x86_64 e boot QEMU serão registrados após a validação final.
+### Implemented
 
-Validação final:
+- `arch::keyboard` reads port `0x60` and stores the most recent scancode atomically;
+- keyboard handler installed on IRQ1 after PIC remapping;
+- IRQ1 unmasked while IRQ0 remains masked until scheduler work;
+- `hal::keyboard` decodes Set 1 scancodes for eight basic keys;
+- kernel reports decoded keys through serial diagnostics;
+- tests for a supported key press and ignored key-release scancode;
+- dedicated documentation in [`input.md`](input.md).
 
-- `cargo xtask build`: kernel x86_64 compilado.
-- `cargo xtask run` no QEMU + OVMF: boot aprovado.
-- Saída observada: `NASTALLI OS v0.0.4`, `Kernel heap initialized: 64 KiB.` e `Physical memory: 30298 usable frames.`
-- O QEMU foi encerrado por timeout controlado após a validação, pois o kernel permanece em loop infinito.
+### Decisions
 
-## v0.0.3 — Memória física
+- interrupt context does not allocate, format strings, or call high-level policy code;
+- single-event storage was sufficient to validate the hardware path at this stage;
+- queueing/backpressure is deferred until tasks create a real concurrent consumer;
+- USB and complex keyboard layouts are outside this version's scope.
 
-### Objetivo
+### Verification
 
-Interpretar o mapa de memória do `BootInfo` e disponibilizar frames físicos alinhados de 4 KiB, sem ainda criar heap ou paginação própria.
+- HAL scancode tests: 2 passed;
+- applicable `cargo check`: passed;
+- Clippy with `-D warnings`: passed;
+- `cargo xtask build`: passed;
+- `cargo xtask run` with QEMU + OVMF: passed.
 
-### Implementado
+Observed output included:
 
-- `crates/kernel/src/memory.rs` com `FrameAllocator` e `PhysicalFrame`.
-- Filtragem exclusiva de `MemoryRegionKind::Usable`.
-- Alinhamento seguro de início inclusivo e fim exclusivo.
-- Contagem de frames utilizáveis na inicialização.
-- Testes para bordas desalinhadas e regiões reservadas.
-- Documentação dedicada em `docs/memory.md`.
+```text
+NASTALLI OS v0.0.5
+IDT and keyboard IRQ1 initialized.
+Keyboard input initialized on IRQ1.
+Physical memory: 30296 usable frames.
+```
 
-### Verificação
+QEMU was stopped by a controlled timeout after validation because the kernel remains in an infinite loop.
 
-- Testes unitários do kernel: 2 testes de memória passaram.
-- `cargo check` dos crates aplicáveis: aprovado.
-- `cargo clippy` com `-D warnings`: aprovado.
-- `cargo xtask build`: kernel x86_64 compilado.
-- `cargo xtask run` no QEMU + OVMF: boot aprovado; o kernel reportou `30340 usable frames`.
+---
 
-Saída relevante:
+## v0.0.4 — Initial kernel heap
+
+### Goal
+
+Provide a small, stable first kernel heap for APIs that require allocation without introducing dynamic paging or userspace heap design.
+
+### Implemented
+
+- `crates/kernel/src/heap.rs` with a statically allocated, 8-byte-aligned 64 KiB heap;
+- `linked_list_allocator::LockedHeap` as the global allocator;
+- explicit heap initialization in kernel startup;
+- unit test for the alignment rule;
+- dedicated documentation in [`heap.md`](heap.md).
+
+### Decisions
+
+- static storage avoids depending on kernel-controlled paging at this stage;
+- `FrameAllocator` remains separate and is not prematurely coupled to heap growth;
+- no custom allocation API or speculative ownership abstraction was added.
+
+### Verification
+
+- heap alignment unit test: passed;
+- applicable `cargo check` and `cargo clippy`: passed;
+- final `cargo xtask build`: x86_64 kernel compiled;
+- final `cargo xtask run` under QEMU + OVMF: boot validated.
+
+Observed output included:
+
+```text
+NASTALLI OS v0.0.4
+Kernel heap initialized: 64 KiB.
+Physical memory: 30298 usable frames.
+```
+
+QEMU was stopped by a controlled timeout after validation because the kernel remains in an infinite loop.
+
+---
+
+## v0.0.3 — Physical memory
+
+### Goal
+
+Interpret the `BootInfo` memory map and expose aligned 4 KiB physical frames without implementing a heap or taking control of paging yet.
+
+### Implemented
+
+- `crates/kernel/src/memory.rs` with `FrameAllocator` and `PhysicalFrame`;
+- allocation restricted to `MemoryRegionKind::Usable`;
+- safe handling of inclusive starts and exclusive ends;
+- conservative alignment of region boundaries;
+- usable-frame counting during initialization;
+- tests covering misaligned boundaries and reserved regions;
+- dedicated documentation in [`memory.md`](memory.md).
+
+### Verification
+
+- kernel memory unit tests: 2 passed;
+- applicable `cargo check`: passed;
+- Clippy with `-D warnings`: passed;
+- `cargo xtask build`: passed;
+- `cargo xtask run` with QEMU + OVMF: boot validated and reported `30340 usable frames`.
+
+Relevant output:
 
 ```text
 NASTALLI OS v0.0.3
@@ -143,42 +206,46 @@ IDT, PIC and PIT initialized at 100 Hz.
 Physical memory: 30340 usable frames.
 ```
 
-O QEMU foi encerrado por timeout controlado após a validação, pois o kernel permanece em loop infinito.
+QEMU was stopped by a controlled timeout after validation because the kernel remains in an infinite loop.
 
-## v0.0.2 — Exceções e interrupções
+---
 
-### Objetivo
+## v0.0.2 — Exceptions and interrupts
 
-Instalar a infraestrutura mínima de exceções x86_64 e interrupções de hardware sem introduzir scheduler, processos ou userspace.
+### Goal
 
-### Implementado
+Install the minimum x86_64 exception and hardware-interrupt infrastructure without introducing scheduling, processes, or userspace.
 
-- `crates/arch/src/gdt.rs`: GDT com segmento de código do kernel e TSS.
-- `crates/arch/src/interrupts.rs`: IDT e handlers de breakpoint, page fault e double fault.
-- PIC 8259 remapeado para os vetores 32–47.
-- PIT programado para 100 Hz.
-- Contador atômico de ticks, ainda sem consumidor de scheduling.
-- API mínima `nastalli_arch::gdt::init()` e `nastalli_arch::interrupts::init()`.
-- Teste do divisor PIT para 100 Hz.
-- `xtask run` com descoberta de OVMF e modo headless via `NASTALLI_QEMU_DISPLAY`.
+### Implemented
 
-### Decisões
+- `crates/arch/src/gdt.rs`: GDT with kernel code segment and TSS;
+- `crates/arch/src/interrupts.rs`: IDT with breakpoint, page-fault, and double-fault handlers;
+- PIC 8259 remapped to vectors 32–47;
+- PIT programmed for 100 Hz;
+- atomic tick counter with no scheduler consumer yet;
+- minimal `nastalli_arch::gdt::init()` and `nastalli_arch::interrupts::init()` APIs;
+- test for the PIT divisor used for 100 Hz;
+- `xtask run` with OVMF discovery and headless display control through `NASTALLI_QEMU_DISPLAY`.
 
-- O assembly continua restrito ao crate `arch`.
-- O kernel não manipula portas, registradores ou instruções diretamente.
-- O page fault e o double fault param a CPU após o diagnóstico; recuperação será tratada quando existir gerenciamento de memória e estado de tarefas.
-- O timer apenas incrementa ticks; não há scheduler nesta versão.
+### Decisions
 
-### Verificação
+- assembly remains restricted to `arch`;
+- generic kernel code does not manipulate ports/registers/instructions directly;
+- page fault and double fault stop the CPU after diagnostics at this stage;
+- timer ticks are recorded but not consumed by a scheduler.
 
-Executado com nightly fixado em `nightly-2025-01-01`:
+### Verification
 
-- `rustfmt --check`: aprovado.
-- `cargo check` para `arch`, `hal`, `kernel` e `xtask`: aprovado.
-- `cargo clippy ... -- -D warnings`: aprovado.
-- `cargo xtask test`: 1 teste específico passou; demais crates sem testes ainda.
-- `cargo xtask build`: kernel x86_64 compilado.
-- `cargo xtask run` no QEMU + OVMF: boot aprovado e serial mostrou:
+Validation used the pinned `nightly-2025-01-01` toolchain:
+
+- `rustfmt --check`: passed;
+- `cargo check` for `arch`, `hal`, `kernel`, and `xtask`: passed;
+- `cargo clippy ... -- -D warnings`: passed;
+- `cargo xtask test`: the applicable test passed;
+- `cargo xtask build`: passed;
+- `cargo xtask run` under QEMU + OVMF: boot validated.
+
+Observed serial output included:
 
 ```text
 NASTALLI OS v0.0.2
@@ -188,22 +255,37 @@ Kernel initialized successfully.
 IDT, PIC and PIT initialized at 100 Hz.
 ```
 
-O QEMU foi encerrado por timeout controlado após a validação, pois o kernel permanece em loop infinito.
+QEMU was stopped by a controlled timeout after validation because the kernel remains in an infinite loop.
+
+---
 
 ## v0.0.1 — Boot
 
-### Objetivo
+### Goal
 
-Entrar em um kernel Rust `no_std` por UEFI, escrever pela serial e acessar o framebuffer.
+Enter a Rust `no_std` kernel through UEFI, emit serial diagnostics, and access the boot framebuffer.
 
-### Implementado
+### Implemented
 
-- Cargo workspace com cinco crates mínimos.
-- `bootloader`/`bootloader_api` fixados em `0.11.10`.
-- Target `x86_64-unknown-none` com `build-std` no comando de build.
-- Entry point UEFI, `panic_handler`, serial COM1 e pintura inicial do framebuffer.
-- `tools/xtask` com build, imagem, execução e testes.
+- minimal Cargo workspace with the initially justified crates;
+- `bootloader` / `bootloader_api` pinned to `0.11.10`;
+- `x86_64-unknown-none` target using `build-std` in the kernel build path;
+- UEFI entry point;
+- panic handler;
+- COM1 serial output;
+- initial framebuffer painting;
+- `tools/xtask` commands for build, image creation, execution, and tests.
 
-### Resultado
+### Result
 
-A imagem UEFI foi criada e posteriormente validada no QEMU durante a implementação da v0.0.2.
+The UEFI image was created during the initial milestone and the boot chain was subsequently validated under QEMU/OVMF during the `v0.0.2` work.
+
+---
+
+## Evidence policy going forward
+
+As Nastalli grows, the verification bar must grow with it.
+
+Early milestones can be supported by host tests, target builds, QEMU boot, and serial/runtime evidence. Later milestones should additionally require the tests appropriate to their risk: stress testing, fuzzing, fault injection, SMP race validation, real-hardware qualification, reproducible builds, security review, and upgrade testing.
+
+The roadmap is not evidence. This file should record only verification that actually occurred.
