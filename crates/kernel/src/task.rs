@@ -1,8 +1,8 @@
 //! Minimal kernel task structures.
 //!
-//! This version models task identity and state, but does not perform scheduling
-//! or context switching. The fixed-size table avoids depending on a dynamic
-//! task-storage policy while virtual memory and scheduling are still being built.
+//! This version models task identity and state while the scheduler is being
+//! introduced. The fixed-size table avoids depending on a dynamic task-storage
+//! policy while virtual memory and context switching are still being built.
 
 pub const MAX_TASKS: usize = 16;
 
@@ -43,6 +43,7 @@ impl Task {
 pub enum TaskTableError {
     Capacity,
     NotFound,
+    RunningTaskExists,
 }
 
 pub struct TaskTable {
@@ -86,6 +87,16 @@ impl TaskTable {
     }
 
     pub fn set_state(&mut self, id: TaskId, state: TaskState) -> Result<(), TaskTableError> {
+        if state == TaskState::Running
+            && self
+                .entries
+                .iter()
+                .flatten()
+                .any(|task| task.id != id && task.state == TaskState::Running)
+        {
+            return Err(TaskTableError::RunningTaskExists);
+        }
+
         let task = self
             .entries
             .iter_mut()
@@ -145,7 +156,10 @@ mod tests {
 
         table.set_state(first, TaskState::Running).unwrap();
 
-        assert!(table.set_state(second, TaskState::Running).is_err());
+        assert_eq!(
+            table.set_state(second, TaskState::Running),
+            Err(TaskTableError::RunningTaskExists)
+        );
     }
 
     #[test]
