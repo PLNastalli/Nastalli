@@ -1,8 +1,11 @@
 //! Minimal kernel task structures.
 //!
-//! This version models task identity and state while the scheduler is being
-//! introduced. The fixed-size table avoids depending on a dynamic task-storage
-//! policy while virtual memory and context switching are still being built.
+//! Tasks own identity, scheduler-visible state, saved execution context, and
+//! optional kernel-stack metadata. The fixed-size table avoids depending on a
+//! dynamic task-storage policy while virtual memory and process lifecycle are
+//! still being built.
+
+use nastalli_arch::context::Context;
 
 pub const MAX_TASKS: usize = 16;
 
@@ -24,18 +27,52 @@ pub enum TaskState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KernelStack {
+    start: u64,
+    len: usize,
+}
+
+impl KernelStack {
+    pub const fn new(start: u64, len: usize) -> Self {
+        Self { start, len }
+    }
+
+    pub const fn start(self) -> u64 {
+        self.start
+    }
+
+    pub const fn len(self) -> usize {
+        self.len
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.len == 0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Task {
     id: TaskId,
     state: TaskState,
+    context: Context,
+    kernel_stack: Option<KernelStack>,
 }
 
 impl Task {
-    pub const fn id(self) -> TaskId {
+    pub const fn id(&self) -> TaskId {
         self.id
     }
 
-    pub const fn state(self) -> TaskState {
+    pub const fn state(&self) -> TaskState {
         self.state
+    }
+
+    pub const fn context(&self) -> Context {
+        self.context
+    }
+
+    pub const fn kernel_stack(&self) -> Option<KernelStack> {
+        self.kernel_stack
     }
 }
 
@@ -54,7 +91,7 @@ pub struct TaskTable {
 impl TaskTable {
     pub const fn new() -> Self {
         Self {
-            entries: [None; MAX_TASKS],
+            entries: [const { None }; MAX_TASKS],
             next_id: 0,
         }
     }
@@ -73,16 +110,17 @@ impl TaskTable {
         *slot = Some(Task {
             id,
             state: TaskState::Ready,
+            context: Context::empty(),
+            kernel_stack: None,
         });
         Ok(id)
     }
 
-    pub fn get(&self, id: TaskId) -> Result<Task, TaskTableError> {
+    pub fn get(&self, id: TaskId) -> Result<&Task, TaskTableError> {
         self.entries
             .iter()
             .flatten()
             .find(|task| task.id == id)
-            .copied()
             .ok_or(TaskTableError::NotFound)
     }
 
@@ -97,13 +135,20 @@ impl TaskTable {
             return Err(TaskTableError::RunningTaskExists);
         }
 
-        let task = self
-            .entries
-            .iter_mut()
-            .flatten()
-            .find(|task| task.id == id)
-            .ok_or(TaskTableError::NotFound)?;
+        let task = self.task_mut(id)?;
         task.state = state;
+        Ok(())
+    }
+
+    pub fn install_execution(
+        &mut self,
+        id: TaskId,
+        context: Context,
+        stack: KernelStack,
+    ) -> Result<(), TaskTableError> {
+        let task = self.task_mut(id)?;
+        task.context = context;
+        task.kernel_stack = Some(stack);
         Ok(())
     }
 
@@ -126,16 +171,18 @@ impl TaskTable {
     pub(crate) fn next_ready_after(&self, current: Option<TaskId>) -> Option<TaskId> {
         let start = current
             .and_then(|id| {
-                self.entries
-                    .iter()
-                    .position(|entry| entry.is_some_and(|task| task.id == id))
+                self.entries.iter().position(|entry| {
+                    entry
+                        .as_ref()
+                        .is_some_and(|task| task.id == id)
+                })
             })
             .map(|index| (index + 1) % MAX_TASKS)
             .unwrap_or(0);
 
         for offset in 0..MAX_TASKS {
             let index = (start + offset) % MAX_TASKS;
-            if let Some(task) = self.entries[index] {
+            if let Some(task) = self.entries[index].as_ref() {
                 if task.state == TaskState::Ready {
                     return Some(task.id);
                 }
@@ -143,6 +190,22 @@ impl TaskTable {
         }
 
         None
+    }
+
+    pub(crate) fn context(&self, id: TaskId) -> Result<Context, TaskTableError> {
+        self.get(id).map(Task::context)
+    }
+
+    pub(crate) fn context_mut(&mut self, id: TaskId) -> Result<&mut Context, TaskTableError> {
+        Ok(&mut self.task_mut(id)?.context)
+    }
+
+    fn task_mut(&mut self, id: TaskId) -> Result<&mut Task, TaskTableError> {
+        self.entries
+            .iter_mut()
+            .flatten()
+            .find(|task| task.id == id)
+            .ok_or(TaskTableError::NotFound)
     }
 }
 
