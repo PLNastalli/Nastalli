@@ -1,22 +1,29 @@
-## Resumo
+## Summary
 
-<!-- O que mudou e qual problema concreto isso resolve? -->
+<!-- What changed, and what concrete problem does this solve? -->
 
-## Verificação
+## Verification
+
+Check the commands that apply to this change:
 
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo xtask test`
 - [ ] `cargo check -p nastalli-arch -p nastalli-hal -p nastalli-kernel -p xtask`
+- [ ] `cargo clippy -p nastalli-arch -p nastalli-hal -p nastalli-kernel -p xtask -- -D warnings`
 - [ ] `cargo xtask build`
-- [ ] `cargo xtask run` (quando a mudança afetar boot ou hardware)
+- [ ] `cargo xtask run` (required when the change affects target boot/runtime or hardware behavior)
 
-## Segurança e arquitetura
+## Architecture and safety
 
-- [ ] Documentação atualizada quando necessário.
-- [ ] Todo `unsafe` novo tem justificativa.
-- [ ] Não introduzi dependência direta de hardware no kernel sem razão documentada.
-- [ ] Limitações ou riscos conhecidos estão descritos abaixo.
+- [ ] I updated the relevant documentation when behavior, architecture, build requirements, security assumptions, or roadmap state changed.
+- [ ] Every new `unsafe` block has a documented invariant and is placed at the narrowest appropriate boundary.
+- [ ] I did not introduce architecture-specific hardware access into generic kernel policy without a documented reason.
+- [ ] I documented known limitations, risks, and unsupported behavior below.
 
-## Notas
+## Security impact
 
-<!-- Inclua saída relevante, limitações, riscos ou próximos passos. -->
+<!-- Describe privilege, memory-safety, input-validation, trust-boundary, persistence, or data-integrity impact. Write "None" if not applicable. -->
+
+## Notes
+
+<!-- Include relevant serial output, test evidence, limitations, risks, migration concerns, or follow-up work. -->
