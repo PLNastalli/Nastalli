@@ -1,74 +1,129 @@
-# Nastalli OS
+# Nastalli
 
 [![CI](https://github.com/PLNastalli/Nastalli/actions/workflows/ci.yml/badge.svg)](https://github.com/PLNastalli/Nastalli/actions/workflows/ci.yml)
 
-> Um sistema operacional próprio, modular e seguro, escrito principalmente em Rust.
+**Nastalli is an experimental operating system kernel written primarily in Rust, designed around memory safety, modularity, user sovereignty, and long-term architectural independence.**
 
-Nastalli não é uma distribuição Linux nem uma modificação de outro kernel. É um projeto experimental de longo prazo, iniciado com x86_64, UEFI e QEMU, com uma arquitetura preparada para evoluir para múltiplas arquiteturas.
+> [!WARNING]
+> Nastalli is under active development and is not yet suitable for production systems, real user data, or security-sensitive workloads.
 
-> **Status:** projeto em desenvolvimento ativo. Ainda não é adequado para uso em hardware ou dados reais.
+## Project status
 
-Sistema operacional próprio, escrito principalmente em Rust, começando por x86_64 + UEFI + QEMU. O projeto não é uma distribuição Linux nem uma modificação de outro kernel.
+- **Current version:** `v0.0.6`
+- **Reference platform:** x86_64 + UEFI + QEMU/OVMF
+- **Next milestone:** `v0.0.7` — initial scheduler
+- **Maturity:** early kernel bring-up
 
-## Estado atual
+The current kernel boots through UEFI, enters Rust `no_std`, initializes GDT/TSS, IDT, PIC 8259 and PIT infrastructure, handles basic PS/2 keyboard input through IRQ1, reads the bootloader memory map, exposes a 4 KiB physical-frame allocator model, initializes a static 64 KiB kernel heap, creates a persistent initial task table, accesses the framebuffer, and writes diagnostics through COM1 serial output.
 
-**Versão:** `v0.0.6`
-**Status:** boot validado em QEMU + OVMF
-**Próxima versão:** `v0.0.7`, scheduler inicial
+Nastalli is **not** a Linux distribution and does not reuse the Linux kernel.
 
-A versão atual entra no kernel Rust `no_std`, inicializa GDT/TSS, IDT, PIC 8259 e PIT a 100 Hz, captura teclado PS/2 pela IRQ1, conta frames físicos utilizáveis a partir do `BootInfo`, inicializa uma heap estática de 64 KiB, cria a tabela inicial de tarefas e mantém sua posse no runtime do kernel, acessa o framebuffer e escreve diagnóstico pela serial COM1.
+## Design principles
 
-## Arquitetura
+- **Safe Rust by default.** `unsafe` is restricted to boundaries where hardware, privileged CPU state, boot integration, or invariants not expressible in the type system require it.
+- **Small, explicit boundaries.** Architecture-specific code, hardware abstractions, kernel policy, boot integration, and development tooling remain separated.
+- **Owner-controlled trust.** The long-term design does not depend on a project-controlled master key, mandatory remote authority, mandatory account, or mandatory telemetry.
+- **Evidence before claims.** Documentation must distinguish implemented behavior from planned behavior.
+- **No speculative structure.** New crates and abstractions are introduced when real implementation needs justify them.
+
+> **The machine belongs to its owner. Nastalli protects the user without taking ownership away from them.**
+
+## Architecture
+
+Current workspace direction:
 
 ```text
-Aplicações → runtime/userspace → ABI → syscalls → kernel → HAL → arch → hardware
+boot
+  |
+  v
+kernel
+  |
+  v
+ HAL
+  |
+  v
+arch
+  |
+  v
+hardware
 ```
 
-O workspace começa pequeno de propósito: `arch`, `hal`, `kernel`, `boot` e `xtask` só recebem novas responsabilidades quando existe código real que as justifique. Detalhes das fronteiras estão em [docs/architecture.md](docs/architecture.md).
+The long-term direction adds a stable userspace ABI, process isolation, virtual memory, IPC, capabilities, VFS, device management, networking, and broader hardware support. These are roadmap goals and must not be interpreted as currently implemented features.
 
-## Documentação
+See [docs/architecture.md](docs/architecture.md) for the current boundaries and long-term direction.
 
-- [Índice da documentação](docs/README.md)
-- [Arquitetura](docs/architecture.md)
-- [Histórico e decisões por versão](docs/progress.md)
-- [Fluxo de boot](docs/boot.md)
-- [Política de unsafe](docs/unsafe-policy.md)
-- [Modelo de segurança e posse](docs/security-model.md)
-- [Roadmap](docs/roadmap.md)
+## Roadmap
 
-## Comandos
+The roadmap is organized by engineering maturity rather than fixed dates:
+
+| Milestone | Focus |
+|---|---|
+| `v0.0.x` | Kernel bring-up: boot, interrupts, memory, heap, input, task model |
+| `v0.1.0` | Scheduler, context switching, Ring 3, syscalls, first userspace |
+| `v0.2.0` | Processes, threads, virtual memory, ELF loading |
+| `v0.3.0` | VFS, persistent storage, block I/O |
+| `v0.4.0` | Driver/platform framework, PCIe, ACPI, VirtIO, storage drivers |
+| `v0.5.0` | Networking stack and sockets |
+| `v0.6.0` | SMP, APIC/IOAPIC, multicore scheduling, synchronization |
+| `v0.7.0` | Capability-oriented security and owner-controlled trust |
+| `v0.8.0` | USB, richer input, graphics/audio foundations, hotplug |
+| `v0.9.x` | Stabilization, fuzzing, fault injection, ABI freeze candidates, hardware qualification |
+| `v1.0.0` | Production-grade baseline for explicitly supported configurations |
+| `v1.x+` | Broader hardware, performance, additional filesystems and architectures |
+
+`v1.0.0` will mean **stable within a documented support matrix**, not universal Windows/Linux-level hardware compatibility.
+
+See the full [roadmap](docs/roadmap.md).
+
+## Build and run
+
+The repository pins its Rust nightly toolchain in [`rust-toolchain.toml`](rust-toolchain.toml), including the `rust-src` and `llvm-tools-preview` components required by the current bootloader toolchain.
+
+Typical development commands:
 
 ```bash
-cargo xtask build   # compila o kernel para x86_64-unknown-none
-cargo xtask image   # cria target/nastalli-uefi.img
-cargo xtask run     # cria a imagem e inicia QEMU
-cargo xtask test    # executa testes host dos crates verificáveis
-```
-
-Para ambientes headless, use `NASTALLI_QEMU_DISPLAY=none cargo xtask run`.
-
-## Desenvolvimento
-
-Requisitos: Rust nightly definido em [`rust-toolchain.toml`](rust-toolchain.toml), target `x86_64-unknown-none`, componentes `rust-src` e `llvm-tools-preview`, QEMU e OVMF.
-
-```bash
-rustup component add rust-src llvm-tools-preview --toolchain nightly-2025-01-01
 cargo fmt --all -- --check
 cargo xtask test
 cargo xtask build
+cargo xtask image
 cargo xtask run
 ```
 
-Contribuições devem manter a documentação sincronizada e explicar qualquer novo bloco `unsafe`. Consulte [CONTRIBUTING.md](CONTRIBUTING.md) e [SECURITY.md](SECURITY.md).
+Useful environment variables:
 
-## Princípios
+```bash
+NASTALLI_QEMU_DISPLAY=none cargo xtask run
+NASTALLI_OVMF_CODE=/path/to/OVMF_CODE.fd cargo xtask run
+```
 
-- Safe Rust por padrão; `unsafe` concentrado em `arch`, `hal` e integração de boot.
-- Separação entre kernel, HAL, arquitetura e ferramentas.
-- Sem autoridade remota, chave mestra do projeto ou telemetria obrigatória.
-- Novos módulos só entram quando houver código real e um problema concreto para resolver.
-- Toda mudança relevante deve atualizar a documentação e registrar sua verificação.
+`cargo xtask build` targets `x86_64-unknown-none`. `cargo xtask image` creates the UEFI disk image, and `cargo xtask run` starts QEMU using OVMF.
 
-## Licença
+## Documentation
 
-A licença definitiva ainda será escolhida antes do primeiro release público. Até lá, o repositório deve ser tratado como código experimental sem autorização implícita para redistribuição comercial.
+- [Documentation index](docs/README.md)
+- [Architecture](docs/architecture.md)
+- [Roadmap](docs/roadmap.md)
+- [Technical progress and validation history](docs/progress.md)
+- [Boot flow](docs/boot.md)
+- [Physical memory](docs/memory.md)
+- [Kernel heap](docs/heap.md)
+- [Input](docs/input.md)
+- [Task model](docs/tasks.md)
+- [`unsafe` policy](docs/unsafe-policy.md)
+- [Security and ownership model](docs/security-model.md)
+
+## Contributing
+
+Contributions should be small, testable, architecture-aware, and documented. Any meaningful change to architecture, build behavior, security assumptions, or roadmap state must update the relevant documentation in the same development cycle.
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes.
+
+## Security
+
+Nastalli currently provides **no production security guarantee**. Security-sensitive issues should be reported responsibly rather than published with immediately usable exploitation details.
+
+See [SECURITY.md](SECURITY.md) and [docs/security-model.md](docs/security-model.md).
+
+## License status
+
+A final redistribution license has not yet been selected for the first public stable release. Until a license is added, no broad permission to copy, modify, or redistribute the code should be assumed.
