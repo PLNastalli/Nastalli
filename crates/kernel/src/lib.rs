@@ -27,8 +27,12 @@ fn write_banner(serial: &mut impl Write) {
 }
 
 fn initialize_platform(serial: &mut impl Write) {
+    let _ = writeln!(serial, "Platform init: GDT start.");
     nastalli_arch::gdt::init();
+    let _ = writeln!(serial, "Platform init: GDT complete.");
+    let _ = writeln!(serial, "Platform init: interrupts start.");
     nastalli_arch::interrupts::init();
+    let _ = writeln!(serial, "Platform init: interrupts complete.");
     let _ = writeln!(serial, "IDT, timer IRQ0 and keyboard IRQ1 initialized.");
 
     heap::init();
