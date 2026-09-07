@@ -11,8 +11,8 @@ pub enum ScheduleDecision {
 }
 
 pub struct PreparedContextSwitch {
-    pub(crate) current: *mut Context,
-    pub(crate) next: Context,
+    pub current: *mut Context,
+    pub next: Context,
 }
 
 pub struct Scheduler {
