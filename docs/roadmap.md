@@ -27,12 +27,14 @@ A version number does not imply support outside the documented hardware/software
 - [x] `v0.0.4` — initial static 64 KiB kernel heap.
 - [x] `v0.0.5` — basic PS/2 keyboard input through IRQ1.
 - [x] `v0.0.6` — task identity/state model with persistent runtime ownership.
+- [x] `v0.0.7` — initial round-robin scheduler policy driven by real 100 Hz PIT ticks, with a 5-tick quantum and runtime tick validation under QEMU.
 
 ### Next
 
-- [ ] `v0.0.7` — initial scheduler policy using PIT ticks.
 - [ ] `v0.0.8` — controlled Ring 3 transition foundation.
 - [ ] `v0.0.9` — minimal independent ABI and syscall entry path.
+
+The `v0.0.7` scheduler milestone validates timer-driven scheduling policy and task-state rotation. It does not yet provide full CPU context switching, independent task stacks, preemptive execution of multiple task bodies, processes, or userspace.
 
 The `v0.0.x` series is still kernel bring-up. It does not promise userspace compatibility, stable APIs, broad hardware support, or production security.
 
