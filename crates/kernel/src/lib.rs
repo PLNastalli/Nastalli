@@ -10,11 +10,22 @@ pub mod task;
 
 pub fn start(boot_info: &'static mut BootInfo) -> ! {
     let mut serial = nastalli_hal::serial::Serial::init();
+    write_banner(&mut serial);
+    initialize_platform(&mut serial);
+    initialize_memory(&mut serial, boot_info);
+    initialize_tasks(&mut serial);
+    paint_framebuffer(boot_info);
+    run(&mut serial);
+}
+
+fn write_banner(serial: &mut impl Write) {
     let _ = writeln!(serial, "NASTALLI OS v0.0.6");
     let _ = writeln!(serial, "Architecture: {}", nastalli_arch::NAME);
     let _ = writeln!(serial, "Boot: UEFI");
     let _ = writeln!(serial, "Kernel initialized successfully.");
+}
 
+fn initialize_platform(serial: &mut impl Write) {
     nastalli_arch::gdt::init();
     nastalli_arch::interrupts::init();
     let _ = writeln!(serial, "IDT and keyboard IRQ1 initialized.");
@@ -26,20 +37,26 @@ pub fn start(boot_info: &'static mut BootInfo) -> ! {
         heap::SIZE / 1024
     );
     let _ = writeln!(serial, "Keyboard input initialized on IRQ1.");
+}
 
+fn initialize_memory(serial: &mut impl Write, boot_info: &mut BootInfo) {
     let usable_frames = {
         let allocator = memory::FrameAllocator::new(&boot_info.memory_regions);
         allocator.total_usable_frames()
     };
     let _ = writeln!(serial, "Physical memory: {usable_frames} usable frames.");
+}
 
+fn initialize_tasks(serial: &mut impl Write) {
     let mut tasks = task::TaskTable::new();
     let bootstrap_task = tasks.create().expect("bootstrap task slot");
     tasks
         .set_state(bootstrap_task, task::TaskState::Running)
         .expect("bootstrap task exists");
     let _ = writeln!(serial, "Task table initialized: {} task.", tasks.len());
+}
 
+fn paint_framebuffer(boot_info: &mut BootInfo) {
     if let Some(framebuffer) = boot_info.framebuffer.as_mut() {
         let info = framebuffer.info();
         let buffer = framebuffer.buffer_mut();
@@ -56,7 +73,9 @@ pub fn start(boot_info: &'static mut BootInfo) -> ! {
             }
         }
     }
+}
 
+fn run(serial: &mut impl Write) -> ! {
     loop {
         if let Some(key) = nastalli_hal::keyboard::take_key() {
             let _ = writeln!(serial, "Key pressed: {key:?}");

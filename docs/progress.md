@@ -2,6 +2,15 @@
 
 Este arquivo registra o que foi implementado, por que foi implementado e quais evidências existem. Cada versão deve ser concluída antes do início da seguinte.
 
+## Manutenção arquitetural após a v0.0.6
+
+- O workspace foi atualizado para `resolver = "3"`, acompanhando a Edition 2024.
+- `kernel::start()` agora coordena apenas a sequência de alto nível e delega banner, plataforma, memória, tarefas, framebuffer e loop para funções pequenas.
+- O framebuffer continua direto no fluxo de boot porque ainda não há um segundo consumidor que justifique `framebuffer → console`.
+- O HAL permanece limitado às abstrações com uso concreto: serial e teclado.
+
+Essa mudança não cria uma nova versão funcional; prepara a base para o scheduler sem antecipar abstrações.
+
 ## v0.0.6 — Estrutura de tarefas
 
 ### Objetivo
