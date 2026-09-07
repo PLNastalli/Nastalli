@@ -1,0 +1,4 @@
+[package]
+name = "nastalli-abi"
+version.workspace = true
+edition.workspace = true
