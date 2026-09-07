@@ -1,0 +1,41 @@
+name: Bug report
+description: Relate um comportamento incorreto reproduzível.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Não inclua segredos nem detalhes de vulnerabilidades. Para segurança, leia SECURITY.md.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit ou versão
+      placeholder: e.g. e3b8fe1 / v0.0.5
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Ambiente
+      description: Informe arquitetura, QEMU/OVMF e sistema hospedeiro.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reprodução
+      description: Liste os comandos e passos mínimos.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Resultado esperado
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Resultado observado
+    validations:
+      required: true

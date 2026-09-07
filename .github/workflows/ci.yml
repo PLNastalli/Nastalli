@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    name: Format, tests and clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-01-01
+          components: rustfmt, clippy, rust-src
+          targets: x86_64-unknown-none
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Run host tests
+        run: cargo xtask test
+      - name: Check host crates
+        run: cargo check -p nastalli-arch -p nastalli-hal -p nastalli-kernel -p xtask
+      - name: Run clippy
+        run: cargo clippy -p nastalli-arch -p nastalli-hal -p nastalli-kernel -p xtask -- -D warnings
+      - name: Build kernel
+        run: cargo xtask build
