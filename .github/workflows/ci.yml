@@ -35,7 +35,7 @@ jobs:
         run: |
           set -o pipefail
           set +e
-          timeout 10s env NASTALLI_QEMU_DISPLAY=none cargo xtask run 2>&1 | tee qemu.log
+          timeout 10s env NASTALLI_QEMU_DISPLAY=none NASTALLI_QEMU_DEBUG=1 cargo xtask run 2>&1 | tee qemu.log
           status=${PIPESTATUS[0]}
           set -e
 
