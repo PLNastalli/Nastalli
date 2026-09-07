@@ -29,7 +29,7 @@ pub fn start(boot_info: &'static mut BootInfo) -> ! {
 }
 
 fn write_banner(serial: &mut impl Write) {
-    let _ = writeln!(serial, "NASTALLI OS v0.0.7");
+    let _ = writeln!(serial, "NASTALLI OS v0.0.9");
     let _ = writeln!(serial, "Architecture: {}", nastalli_arch::NAME);
     let _ = writeln!(serial, "Boot: UEFI");
     let _ = writeln!(serial, "Kernel initialized successfully.");
