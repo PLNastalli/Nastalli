@@ -143,7 +143,6 @@ fn prepare_ring3_probe(boot_info: &BootInfo) -> UserProbe {
 fn run(serial: &mut impl Write, tasks: task::TaskTable, user_probe: UserProbe) -> ! {
     let mut scheduler = scheduler::Scheduler::new(tasks);
     let mut observed_ticks = nastalli_arch::interrupts::ticks();
-    let mut timer_observed = false;
     let _ = writeln!(
         serial,
         "Scheduler initialized: round-robin, {} tick quantum.",
@@ -155,13 +154,9 @@ fn run(serial: &mut impl Write, tasks: task::TaskTable, user_probe: UserProbe) -
         while observed_ticks != current_ticks {
             observed_ticks = observed_ticks.wrapping_add(1);
             let _ = scheduler.on_tick();
-
-            if !timer_observed {
-                let _ = writeln!(serial, "Scheduler timer active: first PIT tick observed.");
-                timer_observed = true;
-                unsafe {
-                    nastalli_arch::user::enter(user_probe.entry, user_probe.stack_top);
-                }
+            let _ = writeln!(serial, "Scheduler timer active: first PIT tick observed.");
+            unsafe {
+                nastalli_arch::user::enter(user_probe.entry, user_probe.stack_top);
             }
         }
 
