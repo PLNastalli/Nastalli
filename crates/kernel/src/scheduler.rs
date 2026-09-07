@@ -81,7 +81,8 @@ impl Scheduler {
 #[cfg(test)]
 mod tests {
     use super::{ScheduleDecision, Scheduler};
-    use crate::task::{TaskState, TaskTable};
+    use crate::task::{KernelStack, TaskState, TaskTable};
+    use nastalli_arch::context::Context;
 
     #[test]
     fn rotates_ready_tasks_when_the_quantum_expires() {
@@ -99,5 +100,38 @@ mod tests {
         });
         assert_eq!(scheduler.task_state(first).unwrap(), TaskState::Ready);
         assert_eq!(scheduler.task_state(second).unwrap(), TaskState::Running);
+    }
+
+    #[test]
+    fn prepares_owned_contexts_for_a_switch_decision() {
+        let mut tasks = TaskTable::new();
+        let first = tasks.create().unwrap();
+        let second = tasks.create().unwrap();
+        tasks
+            .install_execution(
+                first,
+                Context {
+                    stack_pointer: 0x1111,
+                },
+                KernelStack::new(0x1000, 4096),
+            )
+            .unwrap();
+        tasks
+            .install_execution(
+                second,
+                Context {
+                    stack_pointer: 0x2222,
+                },
+                KernelStack::new(0x2000, 4096),
+            )
+            .unwrap();
+        tasks.set_state(first, TaskState::Running).unwrap();
+
+        let mut scheduler = Scheduler::with_quantum(tasks, 1);
+        let decision = scheduler.on_tick();
+        let prepared = scheduler.prepare_context_switch(decision).unwrap();
+
+        assert_eq!(prepared.next.stack_pointer, 0x2222);
+        assert_eq!(unsafe { (*prepared.current).stack_pointer }, 0x1111);
     }
 }
