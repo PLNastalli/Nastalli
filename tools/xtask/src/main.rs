@@ -50,13 +50,13 @@ fn run_qemu() -> io::Result<()> {
     if !program_in_path("qemu-system-x86_64") {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            "qemu-system-x86_64 não encontrado; instale QEMU",
+            "qemu-system-x86_64 was not found; install QEMU",
         ));
     }
     let ovmf = find_ovmf().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "OVMF não encontrado; defina NASTALLI_OVMF_CODE ou instale edk2-ovmf",
+            "OVMF was not found; set NASTALLI_OVMF_CODE or install OVMF/edk2-ovmf",
         )
     })?;
     let display = env::var("NASTALLI_QEMU_DISPLAY").unwrap_or_else(|_| "gtk".to_owned());
@@ -91,6 +91,7 @@ fn find_ovmf() -> Option<String> {
         "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
         "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd",
         "/usr/share/OVMF/OVMF_CODE.fd",
+        "/usr/share/OVMF/OVMF_CODE_4M.fd",
     ]
     .into_iter()
     .find(|path| std::path::Path::new(path).exists())
