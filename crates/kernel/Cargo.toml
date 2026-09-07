@@ -6,5 +6,6 @@ edition.workspace = true
 [dependencies]
 bootloader_api.workspace = true
 linked_list_allocator = "0.10.5"
+nastalli-abi = { path = "../abi" }
 nastalli-arch = { path = "../arch" }
 nastalli-hal = { path = "../hal" }
