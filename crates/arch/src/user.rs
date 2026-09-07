@@ -7,7 +7,7 @@ use x86_64::instructions::segmentation::{DS, ES, Segment};
 /// `entry` must be a canonical, present, user-accessible executable virtual address and
 /// `stack_top` must be a canonical, present, user-accessible writable stack address. The GDT
 /// must already be loaded with valid Ring 3 code/data selectors, and the TSS must provide a
-/// valid Ring 0 privilege stack for interrupts or exceptions returning to the kernel.
+/// valid Ring 0 privilege stack for exceptions returning to the kernel.
 pub unsafe fn enter(entry: u64, stack_top: u64) -> ! {
     let (user_code, user_data) = crate::gdt::user_selectors();
 
@@ -15,6 +15,7 @@ pub unsafe fn enter(entry: u64, stack_top: u64) -> ! {
         DS::set_reg(user_data);
         ES::set_reg(user_data);
         core::arch::asm!(
+            "cli",
             "push {user_data}",
             "push {stack_top}",
             "pushfq",
