@@ -2,8 +2,8 @@ use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin::Mutex;
-use x86_64::{PrivilegeLevel, VirtAddr};
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
+use x86_64::{PrivilegeLevel, VirtAddr};
 
 use crate::preemption::InterruptContext;
 
@@ -34,9 +34,8 @@ lazy_static! {
             .set_handler_fn(general_protection_fault_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
         unsafe {
-            idt[InterruptIndex::Timer.as_usize()].set_handler_addr(VirtAddr::new(
-                crate::preemption::timer_entry_address(),
-            ));
+            idt[InterruptIndex::Timer.as_usize()]
+                .set_handler_addr(VirtAddr::new(crate::preemption::timer_entry_address()));
         }
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_handler);
         idt[nastalli_abi::SYSCALL_VECTOR as usize]
