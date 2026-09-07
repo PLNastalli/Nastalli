@@ -171,11 +171,9 @@ impl TaskTable {
     pub(crate) fn next_ready_after(&self, current: Option<TaskId>) -> Option<TaskId> {
         let start = current
             .and_then(|id| {
-                self.entries.iter().position(|entry| {
-                    entry
-                        .as_ref()
-                        .is_some_and(|task| task.id == id)
-                })
+                self.entries
+                    .iter()
+                    .position(|entry| entry.as_ref().is_some_and(|task| task.id == id))
             })
             .map(|index| (index + 1) % MAX_TASKS)
             .unwrap_or(0);
