@@ -16,9 +16,12 @@ static TICKS: AtomicU64 = AtomicU64::new(0);
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
-        idt.breakpoint
-            .set_handler_fn(breakpoint_handler)
-            .set_privilege_level(PrivilegeLevel::Ring3);
+        unsafe {
+            idt.breakpoint
+                .set_handler_fn(breakpoint_handler)
+                .set_privilege_level(PrivilegeLevel::Ring3)
+                .set_stack_index(crate::gdt::DOUBLE_FAULT_IST_INDEX);
+        }
         idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
         idt.double_fault.set_handler_fn(double_fault_handler);
         idt.invalid_tss.set_handler_fn(invalid_tss_handler);
