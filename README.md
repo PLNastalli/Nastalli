@@ -9,21 +9,23 @@
 
 ## Project status
 
-- **Current version:** `v0.0.7`
+- **Current version:** `v0.0.9`
 - **Reference platform:** x86_64 + UEFI + QEMU/OVMF
-- **Next milestone:** `v0.0.8` — controlled Ring 3 transition foundation
+- **Next milestone:** `v0.1.0` — first isolated userspace foundation
 - **Maturity:** early kernel bring-up
 
-The current kernel boots through UEFI, enters Rust `no_std`, initializes GDT/TSS, IDT, PIC 8259 and a 100 Hz PIT timer, handles basic PS/2 keyboard input through IRQ1, reads the bootloader memory map, exposes a 4 KiB physical-frame allocator model, initializes a static 64 KiB kernel heap, owns a persistent task table, applies an initial round-robin scheduler policy with a 5-tick quantum, accesses the framebuffer, and writes diagnostics through COM1 serial output.
+The current kernel boots through UEFI, enters Rust `no_std`, initializes GDT/TSS, IDT, PIC 8259 and a 100 Hz PIT timer, handles basic PS/2 keyboard input through IRQ1, reads the bootloader memory map, exposes a 4 KiB physical-frame allocator model, initializes a static 64 KiB kernel heap, owns a persistent task table, applies an initial round-robin scheduler policy with a 5-tick quantum, maps a minimal user code page and user stack, performs a controlled Ring 0 to Ring 3 transition, and validates an experimental userspace-to-kernel software-interrupt entry and return path.
 
-The current scheduler milestone validates timer-driven scheduling policy and task-state rotation. It does **not** yet provide full CPU context switching, independent task stacks, preemptive execution of multiple task bodies, processes, or userspace.
+The current userspace probe runs from mapped user pages, invokes the experimental x86_64 syscall entry through software interrupt vector `0x80`, returns to Ring 3, and then triggers a Ring 3 breakpoint used by QEMU smoke validation. The shared contract lives in the independent `nastalli-abi` crate. This is intentionally an early ABI experiment, not a stable application ABI.
+
+The current scheduler milestone still validates timer-driven scheduling policy and task-state rotation rather than full CPU context switching. Nastalli does **not** yet provide independent preemptive task execution, a process model, a general syscall dispatcher, executable loading, per-process address spaces, or a userspace shell.
 
 Nastalli is **not** a Linux distribution and does not reuse the Linux kernel.
 
 ## Design principles
 
 - **Safe Rust by default.** `unsafe` is restricted to boundaries where hardware, privileged CPU state, boot integration, or invariants not expressible in the type system require it.
-- **Small, explicit boundaries.** Architecture-specific code, hardware abstractions, kernel policy, boot integration, and development tooling remain separated.
+- **Small, explicit boundaries.** Architecture-specific code, hardware abstractions, kernel policy, boot integration, ABI contracts, and development tooling remain separated.
 - **Owner-controlled trust.** The long-term design does not depend on a project-controlled master key, mandatory remote authority, mandatory account, or mandatory telemetry.
 - **Evidence before claims.** Documentation must distinguish implemented behavior from planned behavior.
 - **No speculative structure.** New crates and abstractions are introduced when real implementation needs justify them.
@@ -35,22 +37,25 @@ Nastalli is **not** a Linux distribution and does not reuse the Linux kernel.
 Current workspace direction:
 
 ```text
-boot
-  |
-  v
-kernel
-  |
-  v
- HAL
-  |
-  v
-arch
-  |
-  v
-hardware
+experimental userspace probe
+          |
+          v
+    nastalli-abi
+          |
+          v
+        kernel
+          |
+          +------> HAL
+          |         |
+          +-------->arch
+                    |
+                    v
+          hardware / privileged CPU state
 ```
 
-The long-term direction adds a stable userspace ABI, process isolation, virtual memory, IPC, capabilities, VFS, device management, networking, and broader hardware support. These are roadmap goals and must not be interpreted as currently implemented features.
+`crates/abi` contains the small shared userspace contract. `crates/arch` owns x86_64 privilege-transition, paging, interrupt, and hardware mechanisms. `crates/kernel` owns kernel policy and orchestrates the current Ring 3 probe.
+
+The long-term direction adds processes, virtual memory ownership, a real syscall dispatcher, executable loading, IPC, capabilities, VFS, device management, networking, and broader hardware support. These are roadmap goals and must not be interpreted as currently implemented features.
 
 See [docs/architecture.md](docs/architecture.md) for the current boundaries and long-term direction.
 
@@ -60,8 +65,8 @@ The roadmap is organized by engineering maturity rather than fixed dates:
 
 | Milestone | Focus |
 |---|---|
-| `v0.0.x` | Kernel bring-up: boot, interrupts, memory, heap, input, task model, initial scheduler policy |
-| `v0.1.0` | Scheduler, context switching, Ring 3, syscalls, first userspace |
+| `v0.0.x` | Kernel bring-up: boot, interrupts, memory, heap, input, task model, scheduler policy, Ring 3 and initial ABI entry |
+| `v0.1.0` | Context switching, syscall dispatch/return hardening, first isolated userspace and minimal shell |
 | `v0.2.0` | Processes, threads, virtual memory, ELF loading |
 | `v0.3.0` | VFS, persistent storage, block I/O |
 | `v0.4.0` | Driver/platform framework, PCIe, ACPI, VirtIO, storage drivers |
@@ -112,6 +117,7 @@ NASTALLI_OVMF_VARS=/path/to/OVMF_VARS.fd cargo xtask run
 - [Kernel heap](docs/heap.md)
 - [Input](docs/input.md)
 - [Task model](docs/tasks.md)
+- [Experimental userspace ABI](docs/abi.md)
 - [`unsafe` policy](docs/unsafe-policy.md)
 - [Security and ownership model](docs/security-model.md)
 
