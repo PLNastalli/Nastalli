@@ -116,10 +116,8 @@ impl Scheduler {
             }
         };
 
-        self.tasks.save_preemption_context(
-            from,
-            PreemptionContext::new(interrupted as usize as u64),
-        )?;
+        self.tasks
+            .save_preemption_context(from, PreemptionContext::new(interrupted as usize as u64))?;
         Ok(next.as_ptr())
     }
 }
@@ -157,14 +155,18 @@ mod tests {
         tasks
             .install_execution(
                 first,
-                Context { stack_pointer: 0x1111 },
+                Context {
+                    stack_pointer: 0x1111,
+                },
                 KernelStack::new(0x1000, 4096),
             )
             .unwrap();
         tasks
             .install_execution(
                 second,
-                Context { stack_pointer: 0x2222 },
+                Context {
+                    stack_pointer: 0x2222,
+                },
                 KernelStack::new(0x2000, 4096),
             )
             .unwrap();
