@@ -12,15 +12,15 @@
 - **Current version:** `v0.0.9`
 - **Reference platform:** x86_64 + UEFI + QEMU/OVMF
 - **Next milestone:** `v0.1.0` — first isolated userspace foundation
-- **Maturity:** early kernel bring-up / early userspace and task-execution development
+- **Maturity:** early kernel bring-up / task execution and userspace integration
 
-The current kernel boots through UEFI, enters Rust `no_std`, initializes GDT/TSS, IDT, PIC 8259 and a 100 Hz PIT timer, handles basic PS/2 keyboard input through IRQ1, reads the bootloader memory map, exposes a 4 KiB physical-frame allocator model, initializes a static 64 KiB kernel heap, owns a persistent task table, and applies an initial round-robin scheduler policy with a 5-tick quantum.
+The current kernel boots through UEFI, enters Rust `no_std`, initializes GDT/TSS, IDT, PIC 8259 and a 100 Hz PIT timer, handles basic PS/2 keyboard input through IRQ1, reads the bootloader memory map, exposes a 4 KiB physical-frame allocator model, initializes a static 64 KiB kernel heap, and maintains a persistent task table with a round-robin scheduler using a 5-tick quantum.
 
-The completed `v0.0.x` foundation also maps a minimal user code page and user stack, performs a controlled Ring 0 -> Ring 3 transition, and validates an experimental userspace-to-kernel software-interrupt entry and return path. The current userspace probe invokes vector `0x80`, returns to Ring 3, and then triggers a Ring 3 breakpoint used by QEMU smoke validation. The shared contract lives in the independent `nastalli-abi` crate. This is intentionally an early ABI experiment, not a stable application ABI.
+The completed `v0.0.x` foundation maps a minimal user code page and user stack, performs a controlled Ring 0 -> Ring 3 transition, and validates an experimental userspace-to-kernel software-interrupt entry and return path. The current userspace probe invokes vector `0x80`, returns to Ring 3, and then triggers a Ring 3 breakpoint used by QEMU smoke validation. The shared contract lives in the independent `nastalli-abi` crate. This is intentionally an early ABI experiment, not a stable application ABI.
 
-During `v0.1.0` development, Nastalli now also has a verified x86_64 **cooperative kernel context-switch foundation**: it can save a bootstrap context, execute a worker on an independent physical-frame-backed kernel stack, return to the bootstrap context, resume the suspended worker, and return again. The same QEMU boot then continues through the Ring 3 syscall probe, verifying that the new stack/context path does not regress the privilege-transition path.
+During `v0.1.0` development, Nastalli has progressed from a standalone context-switch proof to **scheduler-managed task execution**. A `Task` now owns its saved CPU `Context` and kernel-stack metadata. Real PIT ticks are consumed by the scheduler policy, `ScheduleDecision::Switch { from, to }` is resolved to those task-owned contexts, and the kernel performs verified bootstrap/worker round trips on independent stacks. The same QEMU boot then continues through the Ring 3 syscall probe, proving that task switching does not regress the privilege-transition path.
 
-This does **not** yet mean the scheduler performs real task context switches. `Task` does not yet own a saved CPU context or kernel stack, PIT IRQ0 does not yet preemptively switch execution, and Nastalli does not yet provide a process model, general syscall dispatcher, executable loading, per-process address spaces, `init`, or a userspace shell.
+This is still **not IRQ-driven preemption**. The PIT handler only records ticks; context switches currently occur from normal kernel execution after polling the tick counter. Nastalli also does not yet provide a process model, general syscall dispatcher, executable loading, per-process address spaces, `init`, or a userspace shell.
 
 Nastalli is **not** a Linux distribution and does not reuse the Linux kernel.
 
@@ -46,18 +46,18 @@ experimental userspace probe
           |
           v
         kernel
-          |
-          +------> HAL
-          |         |
-          +-------->arch
-                    |
-                    v
-          hardware / privileged CPU state
+       /      \
+ task/sched   HAL
+      |        |
+      +------> arch
+                |
+                v
+      hardware / privileged CPU state
 ```
 
-`crates/abi` contains the small shared userspace contract. `crates/arch` owns x86_64 privilege transitions, paging, interrupts, and the low-level context-switch mechanism. `crates/kernel` owns task/scheduler policy and orchestrates the current validation paths.
+`crates/abi` contains the small shared userspace contract. `crates/arch` owns x86_64 privilege transitions, paging, interrupts, and the low-level context-switch mechanism. `crates/kernel` owns task/context lifetime, scheduler policy, memory ownership decisions, and runtime orchestration.
 
-The long-term direction adds scheduler-integrated context switching, task-owned stacks, processes, virtual memory ownership, a real syscall dispatcher, executable loading, IPC, capabilities, VFS, device management, networking, and broader hardware support. These are roadmap goals and must not be interpreted as currently implemented features.
+The long-term direction adds IRQ-driven preemption, processes, virtual memory ownership, a real syscall dispatcher, executable loading, IPC, capabilities, VFS, device management, networking, and broader hardware support. These are roadmap goals and must not be interpreted as currently implemented features.
 
 See [docs/architecture.md](docs/architecture.md) for the current boundaries and long-term direction.
 
@@ -68,7 +68,7 @@ The roadmap is organized by engineering maturity rather than fixed dates:
 | Milestone | Focus |
 |---|---|
 | `v0.0.x` | Kernel bring-up: boot, interrupts, memory, heap, input, task model, scheduler policy, Ring 3 and initial ABI entry |
-| `v0.1.0` | Task-owned context/stacks, preemptive scheduling foundation, syscall integration, first isolated userspace and minimal shell |
+| `v0.1.0` | Task-owned execution, IRQ-driven preemption foundation, syscall integration, first isolated userspace and minimal shell |
 | `v0.2.0` | Processes, threads, virtual memory, ELF loading |
 | `v0.3.0` | VFS, persistent storage, block I/O |
 | `v0.4.0` | Driver/platform framework, PCIe, ACPI, VirtIO, storage drivers |
