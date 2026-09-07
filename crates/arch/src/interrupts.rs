@@ -3,7 +3,6 @@ use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin::Mutex;
 use x86_64::PrivilegeLevel;
-use x86_64::structures::gdt::SegmentSelector;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
 const PIC_1_OFFSET: u8 = 32;
@@ -125,16 +124,11 @@ fn fault(marker: &[u8]) -> ! {
     }
 }
 
-extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
-    let code_segment = SegmentSelector(stack_frame.code_segment as u16);
-    if code_segment.rpl() == PrivilegeLevel::Ring3 {
-        trace(b"Ring 3 probe reached kernel breakpoint.\r\n");
-        loop {
-            core::hint::spin_loop();
-        }
+extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) {
+    trace(b"Ring 3 probe reached kernel breakpoint.\r\n");
+    loop {
+        core::hint::spin_loop();
     }
-
-    crate::serial::write_byte(b'!');
 }
 
 extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
