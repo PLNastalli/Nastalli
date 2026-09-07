@@ -142,29 +142,23 @@ fn prepare_ring3_probe(boot_info: &BootInfo) -> UserProbe {
 
 fn run(serial: &mut impl Write, tasks: task::TaskTable, user_probe: UserProbe) -> ! {
     let mut scheduler = scheduler::Scheduler::new(tasks);
-    let mut observed_ticks = nastalli_arch::interrupts::ticks();
+    let initial_ticks = nastalli_arch::interrupts::ticks();
     let _ = writeln!(
         serial,
         "Scheduler initialized: round-robin, {} tick quantum.",
         scheduler::DEFAULT_QUANTUM_TICKS
     );
 
-    loop {
-        let current_ticks = nastalli_arch::interrupts::ticks();
-        while observed_ticks != current_ticks {
-            observed_ticks = observed_ticks.wrapping_add(1);
-            let _ = scheduler.on_tick();
-            let _ = writeln!(serial, "Scheduler timer active: first PIT tick observed.");
-            unsafe {
-                nastalli_arch::user::enter(user_probe.entry, user_probe.stack_top);
-            }
-        }
-
+    while nastalli_arch::interrupts::ticks() == initial_ticks {
         if let Some(key) = nastalli_hal::keyboard::take_key() {
             let _ = writeln!(serial, "Key pressed: {key:?}");
         }
         core::hint::spin_loop();
     }
+
+    let _ = scheduler.on_tick();
+    let _ = writeln!(serial, "Scheduler timer active: first PIT tick observed.");
+    unsafe { nastalli_arch::user::enter(user_probe.entry, user_probe.stack_top) }
 }
 
 pub fn panic(info: &core::panic::PanicInfo) -> ! {
