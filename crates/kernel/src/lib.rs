@@ -17,12 +17,6 @@ struct UserProbe {
     stack_top: u64,
 }
 
-#[repr(C)]
-struct ContextProbeState {
-    bootstrap: nastalli_arch::context::Context,
-    worker: nastalli_arch::context::Context,
-}
-
 pub fn start(boot_info: &'static mut BootInfo) -> ! {
     let mut serial = nastalli_hal::serial::Serial::init();
     write_banner(&mut serial);
@@ -106,66 +100,103 @@ fn paint_framebuffer(boot_info: &mut BootInfo) {
     }
 }
 
-fn run_context_switch_probe(
-    serial: &mut impl Write,
+fn prepare_scheduler_runtime(
+    mut tasks: task::TaskTable,
     physical_memory_offset: u64,
     allocator: &mut memory::FrameAllocator<'_>,
-) {
+) -> *mut scheduler::Scheduler {
+    let scheduler_frame = allocator
+        .allocate_frame()
+        .expect("scheduler runtime frame");
     let worker_frame = allocator
         .allocate_frame()
-        .expect("context worker stack frame");
+        .expect("task worker stack frame");
+
     unsafe {
+        nastalli_arch::paging::zero_frame(physical_memory_offset, scheduler_frame.start_address);
         nastalli_arch::paging::zero_frame(physical_memory_offset, worker_frame.start_address);
     }
 
-    let worker_page = physical_memory_offset
+    let scheduler_ptr = physical_memory_offset
+        .checked_add(scheduler_frame.start_address)
+        .expect("scheduler virtual address overflow")
+        as *mut scheduler::Scheduler;
+    let worker_stack = physical_memory_offset
         .checked_add(worker_frame.start_address)
-        .expect("context worker stack virtual address overflow") as *mut u8;
-    let state_size = core::mem::size_of::<ContextProbeState>();
-    assert!(state_size < memory::PAGE_SIZE as usize);
+        .expect("worker stack virtual address overflow")
+        as *mut u8;
 
-    let state_ptr = worker_page.cast::<ContextProbeState>();
-    unsafe {
-        state_ptr.write(ContextProbeState {
-            bootstrap: nastalli_arch::context::Context::empty(),
-            worker: nastalli_arch::context::Context::empty(),
-        });
-    }
-
-    let worker_stack_bottom = unsafe { worker_page.add(state_size) };
-    let worker_stack_len = memory::PAGE_SIZE as usize - state_size;
+    let worker_task = tasks.create().expect("worker task slot");
     let worker_context = unsafe {
         nastalli_arch::context::prepare(
-            worker_stack_bottom,
-            worker_stack_len,
-            context_probe_worker,
-            state_ptr.cast(),
+            worker_stack,
+            memory::PAGE_SIZE as usize,
+            task_switch_worker,
+            scheduler_ptr.cast(),
         )
     };
+    tasks
+        .install_execution(
+            worker_task,
+            worker_context,
+            task::KernelStack::new(worker_stack as u64, memory::PAGE_SIZE as usize),
+        )
+        .expect("worker task exists");
 
-    let state = unsafe { &mut *state_ptr };
-    state.worker = worker_context;
-
-    let worker = state.worker;
-    unsafe { nastalli_arch::context::switch(&mut state.bootstrap, &worker) };
-    let _ = writeln!(serial, "Context switch: bootstrap resumed.");
-
-    let worker = state.worker;
-    unsafe { nastalli_arch::context::switch(&mut state.bootstrap, &worker) };
-    let _ = writeln!(serial, "Context switch: bootstrap resumed twice.");
+    unsafe {
+        scheduler_ptr.write(scheduler::Scheduler::new(tasks));
+    }
+    scheduler_ptr
 }
 
-extern "C" fn context_probe_worker(argument: *mut ()) -> ! {
-    let state = unsafe { &mut *argument.cast::<ContextProbeState>() };
+fn wait_for_prepared_switch(
+    scheduler_ptr: *mut scheduler::Scheduler,
+) -> scheduler::PreparedContextSwitch {
+    let mut observed_ticks = nastalli_arch::interrupts::ticks();
+
+    loop {
+        let now = nastalli_arch::interrupts::ticks();
+        while observed_ticks < now {
+            observed_ticks = observed_ticks.saturating_add(1);
+            let decision = unsafe { (&mut *scheduler_ptr).on_tick() };
+            if matches!(decision, scheduler::ScheduleDecision::Switch { .. }) {
+                return unsafe {
+                    (&mut *scheduler_ptr)
+                        .prepare_context_switch(decision)
+                        .expect("scheduled tasks own contexts")
+                };
+            }
+        }
+        core::hint::spin_loop();
+    }
+}
+
+unsafe fn execute_prepared_switch(prepared: scheduler::PreparedContextSwitch) {
+    let current = unsafe { &mut *prepared.current };
+    unsafe { nastalli_arch::context::switch(current, &prepared.next) };
+}
+
+fn run_task_switch_probe(serial: &mut impl Write, scheduler_ptr: *mut scheduler::Scheduler) {
+    let first = wait_for_prepared_switch(scheduler_ptr);
+    unsafe { execute_prepared_switch(first) };
+    let _ = writeln!(serial, "Task switch: bootstrap resumed.");
+
+    let second = wait_for_prepared_switch(scheduler_ptr);
+    unsafe { execute_prepared_switch(second) };
+    let _ = writeln!(serial, "Task switch: bootstrap resumed twice.");
+}
+
+extern "C" fn task_switch_worker(argument: *mut ()) -> ! {
+    let scheduler_ptr = argument.cast::<scheduler::Scheduler>();
     let mut serial = nastalli_hal::serial::Serial::init();
-    let _ = writeln!(serial, "Context switch: worker entered.");
+    let _ = writeln!(serial, "Task switch: worker entered.");
 
-    let bootstrap = state.bootstrap;
-    unsafe { nastalli_arch::context::switch(&mut state.worker, &bootstrap) };
+    let first = wait_for_prepared_switch(scheduler_ptr);
+    unsafe { execute_prepared_switch(first) };
 
-    let _ = writeln!(serial, "Context switch: worker resumed.");
-    let bootstrap = state.bootstrap;
-    unsafe { nastalli_arch::context::switch(&mut state.worker, &bootstrap) };
+    let _ = writeln!(serial, "Task switch: worker resumed.");
+    let second = wait_for_prepared_switch(scheduler_ptr);
+    unsafe { execute_prepared_switch(second) };
 
     loop {
         core::hint::spin_loop();
@@ -221,7 +252,7 @@ fn run(
     physical_memory_offset: u64,
     allocator: &mut memory::FrameAllocator<'_>,
 ) -> ! {
-    let mut scheduler = scheduler::Scheduler::new(tasks);
+    let scheduler_ptr = prepare_scheduler_runtime(tasks, physical_memory_offset, allocator);
     let initial_ticks = nastalli_arch::interrupts::ticks();
     let _ = writeln!(
         serial,
@@ -236,10 +267,10 @@ fn run(
         core::hint::spin_loop();
     }
 
-    let _ = scheduler.on_tick();
+    let _ = unsafe { (&mut *scheduler_ptr).on_tick() };
     let _ = writeln!(serial, "Scheduler timer active: first PIT tick observed.");
 
-    run_context_switch_probe(serial, physical_memory_offset, allocator);
+    run_task_switch_probe(serial, scheduler_ptr);
     let user_probe = prepare_ring3_probe(physical_memory_offset, allocator);
     unsafe { nastalli_arch::user::enter(user_probe.entry, user_probe.stack_top) }
 }
