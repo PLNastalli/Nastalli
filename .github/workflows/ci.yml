@@ -14,7 +14,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2025-01-01
-          components: rustfmt, clippy, rust-src
+          components: rustfmt, clippy, rust-src, llvm-tools-preview
           targets: x86_64-unknown-none
       - name: Check formatting
         run: cargo fmt --all -- --check
