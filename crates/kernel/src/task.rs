@@ -135,10 +135,10 @@ impl TaskTable {
 
         for offset in 0..MAX_TASKS {
             let index = (start + offset) % MAX_TASKS;
-            if let Some(task) = self.entries[index]
-                && task.state == TaskState::Ready
-            {
-                return Some(task.id);
+            if let Some(task) = self.entries[index] {
+                if task.state == TaskState::Ready {
+                    return Some(task.id);
+                }
             }
         }
 
