@@ -33,11 +33,7 @@ pub unsafe fn zero_frame(physical_memory_offset: u64, physical_address: u64) {
     unsafe { core::ptr::write_bytes(pointer, 0, PAGE_SIZE) };
 }
 
-pub unsafe fn write_frame_bytes(
-    physical_memory_offset: u64,
-    physical_address: u64,
-    bytes: &[u8],
-) {
+pub unsafe fn write_frame_bytes(physical_memory_offset: u64, physical_address: u64, bytes: &[u8]) {
     assert!(bytes.len() <= PAGE_SIZE);
     let pointer = (physical_memory_offset + physical_address) as *mut u8;
     unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), pointer, bytes.len()) };
@@ -104,10 +100,9 @@ where
         allocate: allocate_frame,
     };
     let mut mapper = unsafe { active_mapper(physical_memory_offset) };
-    let flush = unsafe {
-        mapper.map_to_with_table_flags(page, frame, flags, parent_flags, &mut allocator)
-    }
-    .map_err(|_| ())?;
+    let flush =
+        unsafe { mapper.map_to_with_table_flags(page, frame, flags, parent_flags, &mut allocator) }
+            .map_err(|_| ())?;
     flush.flush();
     Ok(())
 }
