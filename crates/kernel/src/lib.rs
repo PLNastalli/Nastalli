@@ -9,6 +9,14 @@ pub mod memory;
 pub mod scheduler;
 pub mod task;
 
+const USER_CODE_ADDRESS: u64 = 0x0000_0000_4000_0000;
+const USER_STACK_ADDRESS: u64 = 0x0000_0000_4001_0000;
+
+struct UserProbe {
+    entry: u64,
+    stack_top: u64,
+}
+
 pub fn start(boot_info: &'static mut BootInfo) -> ! {
     let mut serial = nastalli_hal::serial::Serial::init();
     write_banner(&mut serial);
@@ -16,7 +24,8 @@ pub fn start(boot_info: &'static mut BootInfo) -> ! {
     initialize_memory(&mut serial, boot_info);
     let tasks = initialize_tasks(&mut serial);
     paint_framebuffer(boot_info);
-    run(&mut serial, tasks);
+    let user_probe = prepare_ring3_probe(boot_info);
+    run(&mut serial, tasks, user_probe);
 }
 
 fn write_banner(serial: &mut impl Write) {
@@ -86,7 +95,55 @@ fn paint_framebuffer(boot_info: &mut BootInfo) {
     }
 }
 
-fn run(serial: &mut impl Write, tasks: task::TaskTable) -> ! {
+fn prepare_ring3_probe(boot_info: &BootInfo) -> UserProbe {
+    let physical_memory_offset = boot_info
+        .physical_memory_offset
+        .into_option()
+        .expect("physical memory mapping enabled by boot configuration");
+    let mut allocator = memory::FrameAllocator::new(&boot_info.memory_regions);
+    let code_frame = allocator.allocate_frame().expect("Ring 3 code frame");
+    let stack_frame = allocator.allocate_frame().expect("Ring 3 stack frame");
+
+    unsafe {
+        nastalli_arch::paging::zero_frame(physical_memory_offset, code_frame.start_address);
+        nastalli_arch::paging::zero_frame(physical_memory_offset, stack_frame.start_address);
+        nastalli_arch::paging::write_frame_bytes(
+            physical_memory_offset,
+            code_frame.start_address,
+            &[0xcc],
+        );
+    }
+
+    let mut allocate_page_table_frame = || {
+        allocator
+            .allocate_frame()
+            .map(|frame| frame.start_address)
+    };
+
+    unsafe {
+        nastalli_arch::paging::map_user_stack_page(
+            USER_STACK_ADDRESS,
+            stack_frame.start_address,
+            physical_memory_offset,
+            &mut allocate_page_table_frame,
+        )
+        .expect("map Ring 3 stack page");
+        nastalli_arch::paging::map_user_code_page(
+            USER_CODE_ADDRESS,
+            code_frame.start_address,
+            physical_memory_offset,
+            &mut allocate_page_table_frame,
+        )
+        .expect("map Ring 3 code page");
+    }
+
+    UserProbe {
+        entry: USER_CODE_ADDRESS,
+        stack_top: USER_STACK_ADDRESS + memory::PAGE_SIZE,
+    }
+}
+
+fn run(serial: &mut impl Write, tasks: task::TaskTable, user_probe: UserProbe) -> ! {
     let mut scheduler = scheduler::Scheduler::new(tasks);
     let mut observed_ticks = nastalli_arch::interrupts::ticks();
     let mut timer_observed = false;
@@ -105,6 +162,9 @@ fn run(serial: &mut impl Write, tasks: task::TaskTable) -> ! {
             if !timer_observed {
                 let _ = writeln!(serial, "Scheduler timer active: first PIT tick observed.");
                 timer_observed = true;
+                unsafe {
+                    nastalli_arch::user::enter(user_probe.entry, user_probe.stack_top);
+                }
             }
         }
 
