@@ -6,6 +6,7 @@ use core::fmt::Write;
 
 pub mod heap;
 pub mod memory;
+pub mod scheduler;
 pub mod task;
 
 pub fn start(boot_info: &'static mut BootInfo) -> ! {
