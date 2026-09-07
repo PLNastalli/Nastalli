@@ -20,7 +20,7 @@ pub fn start(boot_info: &'static mut BootInfo) -> ! {
 }
 
 fn write_banner(serial: &mut impl Write) {
-    let _ = writeln!(serial, "NASTALLI OS v0.0.6");
+    let _ = writeln!(serial, "NASTALLI OS v0.0.7");
     let _ = writeln!(serial, "Architecture: {}", nastalli_arch::NAME);
     let _ = writeln!(serial, "Boot: UEFI");
     let _ = writeln!(serial, "Kernel initialized successfully.");
@@ -29,7 +29,7 @@ fn write_banner(serial: &mut impl Write) {
 fn initialize_platform(serial: &mut impl Write) {
     nastalli_arch::gdt::init();
     nastalli_arch::interrupts::init();
-    let _ = writeln!(serial, "IDT and keyboard IRQ1 initialized.");
+    let _ = writeln!(serial, "IDT, timer IRQ0 and keyboard IRQ1 initialized.");
 
     heap::init();
     let _ = writeln!(
@@ -83,12 +83,21 @@ fn paint_framebuffer(boot_info: &mut BootInfo) {
 }
 
 fn run(serial: &mut impl Write, tasks: task::TaskTable) -> ! {
-    // Keep ownership of the task table in the long-lived kernel runtime. The
-    // scheduler introduced later can consume this same state instead of
-    // reconstructing tasks after boot.
-    let _tasks = tasks;
+    let mut scheduler = scheduler::Scheduler::new(tasks);
+    let mut observed_ticks = nastalli_arch::interrupts::ticks();
+    let _ = writeln!(
+        serial,
+        "Scheduler initialized: round-robin, {} tick quantum.",
+        scheduler::DEFAULT_QUANTUM_TICKS
+    );
 
     loop {
+        let current_ticks = nastalli_arch::interrupts::ticks();
+        while observed_ticks != current_ticks {
+            observed_ticks = observed_ticks.wrapping_add(1);
+            let _ = scheduler.on_tick();
+        }
+
         if let Some(key) = nastalli_hal::keyboard::take_key() {
             let _ = writeln!(serial, "Key pressed: {key:?}");
         }
