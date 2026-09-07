@@ -18,8 +18,10 @@ lazy_static! {
         idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
         idt.double_fault.set_handler_fn(double_fault_handler);
         idt.invalid_tss.set_handler_fn(invalid_tss_handler);
-        idt.segment_not_present.set_handler_fn(segment_not_present_handler);
-        idt.stack_segment_fault.set_handler_fn(stack_segment_fault_handler);
+        idt.segment_not_present
+            .set_handler_fn(segment_not_present_handler);
+        idt.stack_segment_fault
+            .set_handler_fn(stack_segment_fault_handler);
         idt.general_protection_fault
             .set_handler_fn(general_protection_fault_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
@@ -123,10 +125,7 @@ extern "x86-interrupt" fn double_fault_handler(
     fault(b"FAULT: DF\r\n");
 }
 
-extern "x86-interrupt" fn invalid_tss_handler(
-    stack_frame: InterruptStackFrame,
-    _error_code: u64,
-) {
+extern "x86-interrupt" fn invalid_tss_handler(stack_frame: InterruptStackFrame, _error_code: u64) {
     let _ = stack_frame;
     fault(b"FAULT: TS\r\n");
 }
