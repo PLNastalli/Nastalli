@@ -114,11 +114,8 @@ fn prepare_ring3_probe(boot_info: &BootInfo) -> UserProbe {
         );
     }
 
-    let mut allocate_page_table_frame = || {
-        allocator
-            .allocate_frame()
-            .map(|frame| frame.start_address)
-    };
+    let mut allocate_page_table_frame =
+        || allocator.allocate_frame().map(|frame| frame.start_address);
 
     unsafe {
         nastalli_arch::paging::map_user_stack_page(
