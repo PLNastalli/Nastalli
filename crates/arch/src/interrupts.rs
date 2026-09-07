@@ -51,10 +51,7 @@ pub fn init() {
     unsafe {
         let mut pics = PICS.lock();
         pics.initialize();
-        // Diagnostic control: keep IRQ0 masked and enable only the keyboard.
-        // If STI returns in this configuration, the timer delivery path is the
-        // fault source rather than generic interrupt enabling.
-        pics.write_masks(0b1111_1101, 0xff);
+        pics.write_masks(0b1111_1100, 0xff);
     }
     trace(b"Interrupt init: PIC complete.\r\n");
 
@@ -121,7 +118,6 @@ extern "x86-interrupt" fn page_fault_handler(
 }
 
 extern "x86-interrupt" fn timer_handler(_stack_frame: InterruptStackFrame) {
-    TICKS.fetch_add(1, Ordering::Relaxed);
     unsafe { send_end_of_interrupt(InterruptIndex::Timer.as_u8()) };
 }
 
