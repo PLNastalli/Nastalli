@@ -110,7 +110,7 @@ fn prepare_ring3_probe(boot_info: &BootInfo) -> UserProbe {
         nastalli_arch::paging::write_frame_bytes(
             physical_memory_offset,
             code_frame.start_address,
-            &[0xcc],
+            &[0xcd, nastalli_abi::SYSCALL_VECTOR, 0xcc],
         );
     }
 
