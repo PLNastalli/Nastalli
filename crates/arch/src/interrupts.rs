@@ -100,6 +100,17 @@ fn trace(message: &[u8]) {
     }
 }
 
+fn trace_hex_u64(value: u64) {
+    for shift in (0..16).rev() {
+        let nibble = ((value >> (shift * 4)) & 0x0f) as u8;
+        crate::serial::write_byte(if nibble < 10 {
+            b'0' + nibble
+        } else {
+            b'a' + nibble - 10
+        });
+    }
+}
+
 fn fault(marker: &[u8]) -> ! {
     trace(marker);
     loop {
@@ -148,10 +159,16 @@ extern "x86-interrupt" fn stack_segment_fault_handler(
 
 extern "x86-interrupt" fn general_protection_fault_handler(
     stack_frame: InterruptStackFrame,
-    _error_code: u64,
+    error_code: u64,
 ) {
-    let _ = stack_frame;
-    fault(b"FAULT: GP\r\n");
+    trace(b"FAULT: GP error=0x");
+    trace_hex_u64(error_code);
+    trace(b" rip=0x");
+    trace_hex_u64(stack_frame.instruction_pointer.as_u64());
+    trace(b"\r\n");
+    loop {
+        core::hint::spin_loop();
+    }
 }
 
 extern "x86-interrupt" fn page_fault_handler(
