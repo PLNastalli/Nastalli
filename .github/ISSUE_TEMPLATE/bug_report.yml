@@ -1,41 +1,62 @@
 name: Bug report
-description: Relate um comportamento incorreto reproduzível.
+description: Report a reproducible incorrect behavior in Nastalli.
 title: "bug: "
 labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: Não inclua segredos nem detalhes de vulnerabilidades. Para segurança, leia SECURITY.md.
+      value: |
+        Thanks for helping improve Nastalli. Do not include secrets or immediately exploitable vulnerability details here. For security-sensitive reports, read SECURITY.md first.
   - type: input
     id: commit
     attributes:
-      label: Commit ou versão
-      placeholder: e.g. e3b8fe1 / v0.0.5
+      label: Commit or version
+      description: Identify the exact revision where the issue occurs.
+      placeholder: e.g. 72a510d / v0.0.6
     validations:
       required: true
   - type: textarea
     id: environment
     attributes:
-      label: Ambiente
-      description: Informe arquitetura, QEMU/OVMF e sistema hospedeiro.
+      label: Environment
+      description: Include CPU architecture, QEMU/OVMF or real hardware details, host OS, and relevant toolchain information.
+      placeholder: x86_64, QEMU 9.x, OVMF, CachyOS, nightly-2025-01-01
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
-      label: Reprodução
-      description: Liste os comandos e passos mínimos.
+      label: Reproduction steps
+      description: Provide the minimal commands and steps needed to reproduce the problem.
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Resultado esperado
+      label: Expected behavior
+      description: What should have happened?
     validations:
       required: true
   - type: textarea
     id: actual
     attributes:
-      label: Resultado observado
+      label: Observed behavior
+      description: What actually happened? Include relevant serial output or logs when safe to share.
     validations:
       required: true
+  - type: textarea
+    id: regression
+    attributes:
+      label: Regression information
+      description: If known, identify the last commit/version where this worked correctly.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: This report does not contain secrets or security-sensitive exploitation details.
+          required: true
