@@ -2,6 +2,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin::Mutex;
+use x86_64::PrivilegeLevel;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
 const PIC_1_OFFSET: u8 = 32;
@@ -14,7 +15,9 @@ static TICKS: AtomicU64 = AtomicU64::new(0);
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
-        idt.breakpoint.set_handler_fn(breakpoint_handler);
+        idt.breakpoint
+            .set_handler_fn(breakpoint_handler)
+            .set_privilege_level(PrivilegeLevel::Ring3);
         idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
         idt.double_fault.set_handler_fn(double_fault_handler);
         idt.invalid_tss.set_handler_fn(invalid_tss_handler);
@@ -119,8 +122,14 @@ fn fault(marker: &[u8]) -> ! {
 }
 
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
+    if stack_frame.code_segment.rpl() == PrivilegeLevel::Ring3 {
+        trace(b"Ring 3 probe reached kernel breakpoint.\r\n");
+        loop {
+            core::hint::spin_loop();
+        }
+    }
+
     crate::serial::write_byte(b'!');
-    let _ = stack_frame;
 }
 
 extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
