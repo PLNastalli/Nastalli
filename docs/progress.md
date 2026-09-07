@@ -2,47 +2,187 @@
 
 This file records what was implemented, why it was implemented, and what evidence exists for each milestone. Planned behavior belongs in [`roadmap.md`](roadmap.md); this document is evidence-oriented and should describe only work that actually happened.
 
-## v0.0.7 — Initial scheduler policy
+## v0.1.0 development — Cooperative context-switch foundation
 
 ### Goal
 
-Connect the existing task-state model to real timer ticks and validate a minimal round-robin scheduling policy without claiming full CPU context switching or userspace execution.
+Prove that Nastalli can save a live kernel execution context, run a second kernel context on an independent stack, resume the bootstrap context, resume the suspended worker, and return again before integrating context ownership into scheduler-managed tasks.
 
-### Implemented
+### TDD evidence
 
-- `crates/kernel/src/scheduler.rs` with an initial round-robin policy and a default 5-tick quantum;
-- scheduler tests covering rotation of ready tasks when a quantum expires;
-- runtime ownership of the persistent `TaskTable` by the scheduler;
-- PIT IRQ0 unmasked alongside keyboard IRQ1;
-- a real 100 Hz PIT tick counter consumed by the kernel runtime;
-- serial validation that the first hardware timer tick reaches the scheduler path;
-- QEMU/OVMF smoke validation in CI;
-- modern 4 MiB OVMF launch support through pflash with a writable VARS copy under `target/`.
+The context-switch slice was developed with two explicit RED/GREEN cycles on draft PR #1.
 
-### GDT/IRQ0 defect found during validation
-
-The first runtime smoke test with IRQ0 enabled exposed a General Protection Fault immediately after interrupts were enabled. Instrumentation narrowed the failure to the first timer interrupt and reported:
+The first RED required a fresh-context preparation API from a host test. After formatting was corrected so the test could run, CI failed for the intended reason:
 
 ```text
-FAULT: GP error=0x0000000000000010
+cannot find function `prepare` in module `super`
 ```
 
-The loaded kernel GDT used selector `0x10` for the TSS while segment registers inherited from the bootloader could still reference `0x10` as a data selector. The fix added an explicit kernel data descriptor and reloads `SS`, `DS`, and `ES` after installing the kernel GDT, before loading the TSS. After that correction, IRQ0 could be delivered and return normally.
+The minimal architecture implementation then added:
 
-During isolation, the timer handler was temporarily reduced to EOI-only. After the GDT defect was fixed, `TICKS.fetch_add(1, Ordering::Relaxed)` was restored before the PIC EOI.
+- `arch::context::Context` with a saved stack pointer;
+- fresh-context stack-frame preparation;
+- an x86_64 entry trampoline;
+- assembly save/restore for `rbp`, `rbx`, `r12`, `r13`, `r14`, `r15`, and `rsp`;
+- host coverage for prepared-stack placement/alignment.
+
+CI #105 passed formatting, host tests, checks, Clippy, target build, and the pre-existing QEMU smoke test with that primitive present.
+
+The second RED added QEMU smoke requirements for four context-switch markers before the existing Ring 3 markers. CI then passed all static/build checks and failed only because the runtime had not yet executed the new switch path. This distinguished a real runtime requirement from scheduler-state-only behavior.
+
+### Runtime implementation
+
+The kernel validation path now:
+
+- keeps one monotonic `FrameAllocator` instance for the worker stack and later Ring 3/page-table allocations;
+- allocates one usable physical frame for the context worker;
+- zeros and accesses that frame through the direct physical-memory mapping;
+- stores stable bootstrap/worker saved contexts at the beginning of the frame;
+- uses the remainder of the frame as an independent worker kernel stack;
+- performs bootstrap -> worker -> bootstrap -> resumed worker -> bootstrap;
+- continues into the existing Ring 3 syscall probe afterward.
+
+The dedicated worker is a validation probe. It is not yet a scheduler-managed `Task`.
 
 ### Verification
 
-The final CI run for the functional fix passed:
+CI #108 completed successfully with:
 
 - `cargo fmt --all -- --check`;
 - `cargo xtask test`;
 - applicable `cargo check`;
 - Clippy with `-D warnings`;
-- `cargo xtask build` for the x86_64 kernel target;
+- `cargo xtask build` for `x86_64-unknown-none`;
 - QEMU + OVMF smoke validation.
 
-Observed runtime output included:
+The smoke test required the following execution evidence in one boot:
+
+```text
+Context switch: worker entered.
+Context switch: bootstrap resumed.
+Context switch: worker resumed.
+Context switch: bootstrap resumed twice.
+Ring 3 syscall entered kernel and returned.
+Ring 3 probe reached kernel breakpoint.
+```
+
+This verifies real continuation across two kernel stacks and confirms that the earlier userspace privilege-transition path still works after the context-switch probe.
+
+### Limits
+
+This slice does **not** complete `v0.1.0`:
+
+- `Task` does not yet own a saved `Context` or kernel stack;
+- scheduler `Switch { from, to }` decisions do not yet call the architecture switch routine;
+- PIT IRQ0 does not yet preemptively switch live task contexts;
+- there is no generic task-stack allocation/teardown lifecycle;
+- process/thread objects, ELF loading, `init`, shell, and process exit remain future work.
+
+---
+
+## v0.0.9 — Experimental ABI and syscall entry/return
+
+### Goal
+
+Create the first independent userspace/kernel ABI contract and prove a controlled syscall entry from Ring 3 that returns to user execution.
+
+### Implemented
+
+- `crates/abi` as a small `no_std` workspace crate;
+- experimental syscall vector `0x80` shared across the userspace/kernel boundary;
+- Ring 3-callable IDT gate at that vector;
+- kernel handler that returns through the interrupt frame;
+- Ring 3 probe bytes equivalent to `int 0x80; int3`;
+- CI smoke assertions that require the syscall-return marker before the later breakpoint marker.
+
+### Verification
+
+The functional CI path proved:
+
+```text
+Ring 3 syscall entered kernel and returned.
+Ring 3 probe reached kernel breakpoint.
+```
+
+CI #98 passed the full static/build/QEMU pipeline for the syscall path, and CI #100 passed the finalized `v0.0.9` runtime banner/state.
+
+### Limits
+
+- the ABI is experimental and not stable;
+- there is no general syscall dispatcher or syscall-number namespace yet;
+- argument, return-value, error, handle, and compatibility contracts are not frozen;
+- there is no process lifecycle or first userspace program yet.
+
+---
+
+## v0.0.8 — Controlled Ring 3 transition foundation
+
+### Goal
+
+Prove a controlled x86_64 privilege transition from Ring 0 to Ring 3 and a safe exception transition back to the kernel privilege stack.
+
+### Implemented
+
+- Ring 3 code/data descriptors in the GDT;
+- TSS Ring 0 privilege-stack support;
+- user-accessible code and stack mappings;
+- architecture `iretq` transition helper;
+- Ring 3-callable breakpoint gate for validation;
+- runtime probe that enters user code and reaches the kernel breakpoint handler.
+
+Validation work also exposed privilege-stack/TSS/IST mistakes that could reset QEMU before useful diagnostics. Those stack invariants were corrected before the milestone was considered complete.
+
+### Verification
+
+CI smoke validation required:
+
+```text
+Ring 3 probe reached kernel breakpoint.
+```
+
+The passing smoke established that user execution reached Ring 3 and that the CPU subsequently entered the kernel handler through the configured privilege boundary.
+
+### Limits
+
+- no general userspace runtime existed yet;
+- no syscall contract was part of this milestone;
+- the mapped code/stack were a validation probe rather than a process address space;
+- process isolation and lifecycle were not implemented.
+
+---
+
+## v0.0.7 — Initial scheduler policy
+
+### Goal
+
+Connect the existing task-state model to real timer ticks and validate a minimal round-robin scheduling policy without claiming full CPU context switching.
+
+### Implemented
+
+- `crates/kernel/src/scheduler.rs` with an initial round-robin policy and default 5-tick quantum;
+- scheduler tests covering rotation of ready tasks when a quantum expires;
+- runtime ownership of the persistent `TaskTable` by the scheduler;
+- PIT IRQ0 unmasked alongside keyboard IRQ1;
+- real 100 Hz PIT tick counter consumed by the kernel runtime;
+- serial validation that the first hardware timer tick reaches the scheduler path;
+- QEMU/OVMF smoke validation in CI;
+- modern 4 MiB OVMF pflash launch support with a writable VARS copy under `target/`.
+
+### GDT/IRQ0 defect found during validation
+
+Enabling IRQ0 exposed a General Protection Fault immediately after interrupts were enabled:
+
+```text
+FAULT: GP error=0x0000000000000010
+```
+
+The loaded kernel GDT used selector `0x10` for the TSS while inherited segment registers could still refer to `0x10` as a data selector. The fix added an explicit kernel data descriptor and reloaded `SS`, `DS`, and `ES` after installing the GDT and before loading the TSS. After that correction, timer interrupts could be delivered and return normally.
+
+### Verification
+
+The milestone passed formatting, host tests, applicable checks, Clippy with `-D warnings`, target kernel build, and QEMU/OVMF smoke validation.
+
+Observed output included:
 
 ```text
 NASTALLI OS v0.0.7
@@ -51,13 +191,11 @@ Scheduler initialized: round-robin, 5 tick quantum.
 Scheduler timer active: first PIT tick observed.
 ```
 
-### Limits
+### Limits at that milestone
 
-- scheduler policy and task-state rotation exist, but full CPU context switching is not implemented yet;
-- tasks do not yet own independent execution stacks;
-- multiple task bodies are not yet preemptively executed;
-- there are no processes or Ring 3 userspace yet;
-- ABI and syscall entry are still future milestones.
+- scheduling policy rotated task states but did not switch CPU execution contexts;
+- tasks did not own independent execution stacks;
+- multiple task bodies were not preemptively executed.
 
 ---
 
@@ -65,37 +203,28 @@ Scheduler timer active: first PIT tick observed.
 
 ### Runtime and CI foundation
 
-After `v0.0.6`, several maintenance changes prepared the codebase for the scheduler milestone:
+Several maintenance changes prepared the codebase for later scheduler/userspace milestones:
 
-- the Cargo workspace was updated to `resolver = "3"` for Edition 2024;
-- `kernel::start()` was reduced to high-level orchestration and delegates banner, platform, memory, task, framebuffer, and runtime-loop work to smaller initialization functions;
-- the `TaskTable` stopped being temporary: `initialize_tasks()` returns the table and moves ownership into the long-running kernel runtime;
-- a regression test was added to confirm that bootstrap-state construction produces exactly one task;
-- framebuffer painting remains directly in the boot flow because a second real consumer does not yet justify a separate `framebuffer -> console` abstraction;
-- the HAL remains limited to abstractions with concrete consumers, currently serial and keyboard input;
-- the Rust toolchain declaration now includes `rust-src` and `llvm-tools-preview`;
-- CI also installs the LLVM tools because `bootloader 0.11.10` requires them during its build.
+- Cargo workspace updated to `resolver = "3"` for Edition 2024;
+- `kernel::start()` reduced to high-level orchestration with smaller initialization functions;
+- `TaskTable` ownership moved into the long-running runtime rather than being discarded;
+- bootstrap task-table regression coverage added;
+- framebuffer abstraction intentionally deferred until a second real consumer exists;
+- HAL kept limited to concrete serial/keyboard consumers;
+- `rust-src` and `llvm-tools-preview` included in the pinned toolchain;
+- CI installs the LLVM tools required by `bootloader 0.11.10`.
 
-The first public CI runs failed before host tests completed because LLVM tools were unavailable. The failure was confirmed in GitHub Actions logs as:
+The first public CI attempts exposed a missing LLVM-tools dependency:
 
 ```text
 failed to get llvm tools: NotFound
 ```
 
-After `llvm-tools-preview` was added to the toolchain/CI environment, the corrected CI run completed successfully.
+After `llvm-tools-preview` was added, the corrected pipeline completed successfully.
 
 ### Documentation and project presentation
 
-The public repository documentation was professionalized while preserving the distinction between implemented and planned behavior:
-
-- public documentation was converted to English-first;
-- the README was rewritten around current capabilities, explicit experimental status, build/run instructions, architecture, and engineering principles;
-- architecture documentation separates the current implementation from long-term target layers;
-- the roadmap was expanded from short bring-up milestones into an evidence-based maturity path through `v1.0.0` and beyond;
-- `v1.0.0` was defined as a production-grade baseline for explicitly supported configurations rather than a claim of universal Windows/Linux-level hardware compatibility;
-- future hardware support is described through explicit Tier 1/Tier 2/Tier 3/unsupported categories;
-- contribution, security, subsystem, and unsafe-code documentation was rewritten in professional English while preserving current implementation facts;
-- a design record and implementation plan were added under `docs/superpowers/` for the documentation overhaul.
+The public documentation was rewritten around implemented behavior, explicit experimental status, current architecture, build/run instructions, engineering principles, support tiers, security reporting, and evidence-based roadmap gates. `v1.0.0` is defined as a production-grade baseline only for explicitly documented supported configurations rather than a claim of universal hardware compatibility.
 
 ---
 
@@ -103,48 +232,25 @@ The public repository documentation was professionalized while preserving the di
 
 ### Goal
 
-Create a minimal contract for task identity and task state without introducing a scheduler, context switching, or userspace yet.
+Create a minimal contract for task identity and task state without introducing a scheduler or execution contexts yet.
 
 ### Implemented
 
-- `crates/kernel/src/task.rs` with `TaskId`, `TaskState`, `Task`, and `TaskTable`;
-- fixed table capacity of 16 tasks without dynamic storage policy;
+- `TaskId`, `TaskState`, `Task`, and fixed-capacity `TaskTable`;
+- capacity of 16 tasks;
 - monotonic task IDs;
 - explicit create, lookup, and state-update operations;
-- bootstrap task created during initialization and marked `Running` as descriptive state only;
-- bootstrap table kept alive by explicit ownership in the kernel runtime rather than a singleton/global;
-- tests covering creation, monotonic IDs, state transitions, capacity, missing tasks, and bootstrap-state construction;
-- dedicated documentation in [`tasks.md`](tasks.md).
-
-### Limits
-
-- PIT infrastructure exists, but IRQ0 remains masked in the `v0.0.6` runtime;
-- there is no scheduler in `v0.0.6`;
-- there is no preemption;
-- there is no saved CPU context model;
-- tasks do not yet own independent stacks;
-- there are no processes or userspace execution.
+- bootstrap task marked `Running`;
+- explicit runtime ownership rather than a global singleton;
+- tests for identity, state, capacity, lookup/update, and bootstrap construction.
 
 ### Verification
 
-Before the post-v0.0.6 maintenance work, local verification recorded:
+Formatting, host tests, applicable checks, Clippy, target build, and QEMU/OVMF boot validation passed for the milestone. Runtime output included the bootstrap task-table count.
 
-- `cargo fmt --all -- --check`: passed;
-- `cargo xtask test`: task-model tests and applicable crate tests passed;
-- applicable `cargo check`: passed;
-- `cargo clippy ... -- -D warnings`: passed;
-- `cargo xtask build`: x86_64 kernel build succeeded;
-- `cargo xtask run` with QEMU + OVMF: boot validated.
+### Limits at that milestone
 
-Observed output included:
-
-```text
-NASTALLI OS v0.0.6
-Physical memory: 30269 usable frames.
-Task table initialized: 1 task.
-```
-
-QEMU was stopped by a controlled timeout after validation because the kernel intentionally remains in an infinite runtime loop.
+There was no scheduler, context switching, independent task stack, process model, or userspace execution.
 
 ---
 
@@ -156,39 +262,17 @@ Capture basic keyboard input under QEMU through IRQ1 while keeping the interrupt
 
 ### Implemented
 
-- `arch::keyboard` reads port `0x60` and stores the most recent scancode atomically;
+- `arch::keyboard` reads port `0x60` and stores the latest scancode atomically;
 - keyboard handler installed on IRQ1 after PIC remapping;
-- IRQ1 unmasked while IRQ0 remains masked until scheduler work;
-- `hal::keyboard` decodes Set 1 scancodes for eight basic keys;
-- kernel reports decoded keys through serial diagnostics;
-- tests for a supported key press and ignored key-release scancode;
-- dedicated documentation in [`input.md`](input.md).
+- HAL Set 1 decoding for the initial supported keys;
+- serial reporting from normal kernel context;
+- regression tests for supported press and ignored release behavior.
 
-### Decisions
-
-- interrupt context does not allocate, format strings, or call high-level policy code;
-- single-event storage was sufficient to validate the hardware path at this stage;
-- queueing/backpressure is deferred until tasks create a real concurrent consumer;
-- USB and complex keyboard layouts are outside this version's scope.
+The interrupt path avoids allocation, formatted output, and high-level policy work.
 
 ### Verification
 
-- HAL scancode tests: 2 passed;
-- applicable `cargo check`: passed;
-- Clippy with `-D warnings`: passed;
-- `cargo xtask build`: passed;
-- `cargo xtask run` with QEMU + OVMF: passed.
-
-Observed output included:
-
-```text
-NASTALLI OS v0.0.5
-IDT and keyboard IRQ1 initialized.
-Keyboard input initialized on IRQ1.
-Physical memory: 30296 usable frames.
-```
-
-QEMU was stopped by a controlled timeout after validation because the kernel remains in an infinite loop.
+HAL tests, applicable checks, Clippy, target build, and QEMU/OVMF runtime validation passed.
 
 ---
 
@@ -196,38 +280,19 @@ QEMU was stopped by a controlled timeout after validation because the kernel rem
 
 ### Goal
 
-Provide a small, stable first kernel heap for APIs that require allocation without introducing dynamic paging or userspace heap design.
+Provide a small first kernel heap without depending on dynamic paging.
 
 ### Implemented
 
-- `crates/kernel/src/heap.rs` with a statically allocated, 8-byte-aligned 64 KiB heap;
-- `linked_list_allocator::LockedHeap` as the global allocator;
-- explicit heap initialization in kernel startup;
-- unit test for the alignment rule;
-- dedicated documentation in [`heap.md`](heap.md).
+- statically allocated 64 KiB heap;
+- `linked_list_allocator::LockedHeap` global allocator;
+- explicit initialization and alignment regression coverage.
 
-### Decisions
-
-- static storage avoids depending on kernel-controlled paging at this stage;
-- `FrameAllocator` remains separate and is not prematurely coupled to heap growth;
-- no custom allocation API or speculative ownership abstraction was added.
+The static design deliberately kept physical-frame allocation separate from heap-growth policy.
 
 ### Verification
 
-- heap alignment unit test: passed;
-- applicable `cargo check` and `cargo clippy`: passed;
-- final `cargo xtask build`: x86_64 kernel compiled;
-- final `cargo xtask run` under QEMU + OVMF: boot validated.
-
-Observed output included:
-
-```text
-NASTALLI OS v0.0.4
-Kernel heap initialized: 64 KiB.
-Physical memory: 30298 usable frames.
-```
-
-QEMU was stopped by a controlled timeout after validation because the kernel remains in an infinite loop.
+Heap tests, applicable checks, Clippy, target build, and QEMU/OVMF validation passed.
 
 ---
 
@@ -235,35 +300,19 @@ QEMU was stopped by a controlled timeout after validation because the kernel rem
 
 ### Goal
 
-Interpret the `BootInfo` memory map and expose aligned 4 KiB physical frames without implementing a heap or taking control of paging yet.
+Interpret the boot memory map and expose aligned 4 KiB usable physical frames without taking control of paging yet.
 
 ### Implemented
 
-- `crates/kernel/src/memory.rs` with `FrameAllocator` and `PhysicalFrame`;
+- `FrameAllocator` and `PhysicalFrame`;
 - allocation restricted to `MemoryRegionKind::Usable`;
-- safe handling of inclusive starts and exclusive ends;
 - conservative alignment of region boundaries;
-- usable-frame counting during initialization;
-- tests covering misaligned boundaries and reserved regions;
-- dedicated documentation in [`memory.md`](memory.md).
+- usable-frame counting;
+- tests for misaligned and reserved memory regions.
 
 ### Verification
 
-- kernel memory unit tests: 2 passed;
-- applicable `cargo check`: passed;
-- Clippy with `-D warnings`: passed;
-- `cargo xtask build`: passed;
-- `cargo xtask run` with QEMU + OVMF: boot validated and reported `30340 usable frames`.
-
-Relevant output:
-
-```text
-NASTALLI OS v0.0.3
-IDT, PIC and PIT initialized at 100 Hz.
-Physical memory: 30340 usable frames.
-```
-
-QEMU was stopped by a controlled timeout after validation because the kernel remains in an infinite loop.
+Memory tests, applicable checks, Clippy, target build, and QEMU/OVMF validation passed.
 
 ---
 
@@ -271,48 +320,21 @@ QEMU was stopped by a controlled timeout after validation because the kernel rem
 
 ### Goal
 
-Install the minimum x86_64 exception and hardware-interrupt infrastructure without introducing scheduling, processes, or userspace.
+Install the minimum x86_64 exception and hardware-interrupt foundation.
 
 ### Implemented
 
-- `crates/arch/src/gdt.rs`: GDT with kernel code segment and TSS;
-- `crates/arch/src/interrupts.rs`: IDT with breakpoint, page-fault, and double-fault handlers;
-- PIC 8259 remapped to vectors 32–47;
+- GDT/TSS;
+- IDT with initial exception handlers;
+- PIC 8259 remapping;
 - PIT programmed for 100 Hz;
-- atomic tick counter with no scheduler consumer yet;
-- minimal `nastalli_arch::gdt::init()` and `nastalli_arch::interrupts::init()` APIs;
-- test for the PIT divisor used for 100 Hz;
-- `xtask run` with OVMF discovery and headless display control through `NASTALLI_QEMU_DISPLAY`.
-
-### Decisions
-
-- assembly remains restricted to `arch`;
-- generic kernel code does not manipulate ports/registers/instructions directly;
-- page fault and double fault stop the CPU after diagnostics at this stage;
-- timer ticks are recorded but not consumed by a scheduler.
+- atomic tick foundation;
+- OVMF discovery and headless QEMU support in `xtask`;
+- PIT divisor regression coverage.
 
 ### Verification
 
-Validation used the pinned `nightly-2025-01-01` toolchain:
-
-- `rustfmt --check`: passed;
-- `cargo check` for `arch`, `hal`, `kernel`, and `xtask`: passed;
-- `cargo clippy ... -- -D warnings`: passed;
-- `cargo xtask test`: the applicable test passed;
-- `cargo xtask build`: passed;
-- `cargo xtask run` under QEMU + OVMF: boot validated.
-
-Observed serial output included:
-
-```text
-NASTALLI OS v0.0.2
-Architecture: x86_64
-Boot: UEFI
-Kernel initialized successfully.
-IDT, PIC and PIT initialized at 100 Hz.
-```
-
-QEMU was stopped by a controlled timeout after validation because the kernel remains in an infinite loop.
+Pinned-toolchain formatting, applicable checks, Clippy, host tests, target build, and QEMU/OVMF boot validation passed.
 
 ---
 
@@ -324,18 +346,16 @@ Enter a Rust `no_std` kernel through UEFI, emit serial diagnostics, and access t
 
 ### Implemented
 
-- minimal Cargo workspace with the initially justified crates;
+- initial Cargo workspace and justified crate boundaries;
 - `bootloader` / `bootloader_api` pinned to `0.11.10`;
-- `x86_64-unknown-none` target using `build-std` in the kernel build path;
+- `x86_64-unknown-none` build path;
 - UEFI entry point;
 - panic handler;
 - COM1 serial output;
 - initial framebuffer painting;
-- `tools/xtask` commands for build, image creation, execution, and tests.
+- `xtask` build/image/run/test commands.
 
-### Result
-
-The UEFI image was created during the initial milestone and the boot chain was subsequently validated under QEMU/OVMF during the `v0.0.2` work.
+The initial UEFI image path was subsequently validated under QEMU/OVMF as the interrupt work matured.
 
 ---
 

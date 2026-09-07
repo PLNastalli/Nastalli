@@ -17,6 +17,12 @@ struct UserProbe {
     stack_top: u64,
 }
 
+#[repr(C)]
+struct ContextProbeState {
+    bootstrap: nastalli_arch::context::Context,
+    worker: nastalli_arch::context::Context,
+}
+
 pub fn start(boot_info: &'static mut BootInfo) -> ! {
     let mut serial = nastalli_hal::serial::Serial::init();
     write_banner(&mut serial);
@@ -24,8 +30,13 @@ pub fn start(boot_info: &'static mut BootInfo) -> ! {
     initialize_memory(&mut serial, boot_info);
     let tasks = initialize_tasks(&mut serial);
     paint_framebuffer(boot_info);
-    let user_probe = prepare_ring3_probe(boot_info);
-    run(&mut serial, tasks, user_probe);
+
+    let physical_memory_offset = boot_info
+        .physical_memory_offset
+        .into_option()
+        .expect("physical memory mapping enabled by boot configuration");
+    let mut allocator = memory::FrameAllocator::new(&boot_info.memory_regions);
+    run(&mut serial, tasks, physical_memory_offset, &mut allocator);
 }
 
 fn write_banner(serial: &mut impl Write) {
@@ -95,12 +106,76 @@ fn paint_framebuffer(boot_info: &mut BootInfo) {
     }
 }
 
-fn prepare_ring3_probe(boot_info: &BootInfo) -> UserProbe {
-    let physical_memory_offset = boot_info
-        .physical_memory_offset
-        .into_option()
-        .expect("physical memory mapping enabled by boot configuration");
-    let mut allocator = memory::FrameAllocator::new(&boot_info.memory_regions);
+fn run_context_switch_probe(
+    serial: &mut impl Write,
+    physical_memory_offset: u64,
+    allocator: &mut memory::FrameAllocator<'_>,
+) {
+    let worker_frame = allocator
+        .allocate_frame()
+        .expect("context worker stack frame");
+    unsafe {
+        nastalli_arch::paging::zero_frame(physical_memory_offset, worker_frame.start_address);
+    }
+
+    let worker_page = physical_memory_offset
+        .checked_add(worker_frame.start_address)
+        .expect("context worker stack virtual address overflow") as *mut u8;
+    let state_size = core::mem::size_of::<ContextProbeState>();
+    assert!(state_size < memory::PAGE_SIZE as usize);
+
+    let state_ptr = worker_page.cast::<ContextProbeState>();
+    unsafe {
+        state_ptr.write(ContextProbeState {
+            bootstrap: nastalli_arch::context::Context::empty(),
+            worker: nastalli_arch::context::Context::empty(),
+        });
+    }
+
+    let worker_stack_bottom = unsafe { worker_page.add(state_size) };
+    let worker_stack_len = memory::PAGE_SIZE as usize - state_size;
+    let worker_context = unsafe {
+        nastalli_arch::context::prepare(
+            worker_stack_bottom,
+            worker_stack_len,
+            context_probe_worker,
+            state_ptr.cast(),
+        )
+    };
+
+    let state = unsafe { &mut *state_ptr };
+    state.worker = worker_context;
+
+    let worker = state.worker;
+    unsafe { nastalli_arch::context::switch(&mut state.bootstrap, &worker) };
+    let _ = writeln!(serial, "Context switch: bootstrap resumed.");
+
+    let worker = state.worker;
+    unsafe { nastalli_arch::context::switch(&mut state.bootstrap, &worker) };
+    let _ = writeln!(serial, "Context switch: bootstrap resumed twice.");
+}
+
+extern "C" fn context_probe_worker(argument: *mut ()) -> ! {
+    let state = unsafe { &mut *argument.cast::<ContextProbeState>() };
+    let mut serial = nastalli_hal::serial::Serial::init();
+    let _ = writeln!(serial, "Context switch: worker entered.");
+
+    let bootstrap = state.bootstrap;
+    unsafe { nastalli_arch::context::switch(&mut state.worker, &bootstrap) };
+
+    let _ = writeln!(serial, "Context switch: worker resumed.");
+    let bootstrap = state.bootstrap;
+    unsafe { nastalli_arch::context::switch(&mut state.worker, &bootstrap) };
+
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+fn prepare_ring3_probe(
+    physical_memory_offset: u64,
+    allocator: &mut memory::FrameAllocator<'_>,
+) -> UserProbe {
     let code_frame = allocator.allocate_frame().expect("Ring 3 code frame");
     let stack_frame = allocator.allocate_frame().expect("Ring 3 stack frame");
 
@@ -140,7 +215,12 @@ fn prepare_ring3_probe(boot_info: &BootInfo) -> UserProbe {
     }
 }
 
-fn run(serial: &mut impl Write, tasks: task::TaskTable, user_probe: UserProbe) -> ! {
+fn run(
+    serial: &mut impl Write,
+    tasks: task::TaskTable,
+    physical_memory_offset: u64,
+    allocator: &mut memory::FrameAllocator<'_>,
+) -> ! {
     let mut scheduler = scheduler::Scheduler::new(tasks);
     let initial_ticks = nastalli_arch::interrupts::ticks();
     let _ = writeln!(
@@ -158,6 +238,9 @@ fn run(serial: &mut impl Write, tasks: task::TaskTable, user_probe: UserProbe) -
 
     let _ = scheduler.on_tick();
     let _ = writeln!(serial, "Scheduler timer active: first PIT tick observed.");
+
+    run_context_switch_probe(serial, physical_memory_offset, allocator);
+    let user_probe = prepare_ring3_probe(physical_memory_offset, allocator);
     unsafe { nastalli_arch::user::enter(user_probe.entry, user_probe.stack_top) }
 }
 
