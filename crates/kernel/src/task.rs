@@ -138,6 +138,17 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_second_running_task() {
+        let mut table = TaskTable::new();
+        let first = table.create().unwrap();
+        let second = table.create().unwrap();
+
+        table.set_state(first, TaskState::Running).unwrap();
+
+        assert!(table.set_state(second, TaskState::Running).is_err());
+    }
+
+    #[test]
     fn reports_capacity_and_missing_tasks() {
         let mut table = TaskTable::new();
         for _ in 0..MAX_TASKS {
