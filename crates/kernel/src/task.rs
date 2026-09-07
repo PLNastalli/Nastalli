@@ -190,14 +190,6 @@ impl TaskTable {
         None
     }
 
-    pub(crate) fn context(&self, id: TaskId) -> Result<Context, TaskTableError> {
-        self.get(id).map(Task::context)
-    }
-
-    pub(crate) fn context_mut(&mut self, id: TaskId) -> Result<&mut Context, TaskTableError> {
-        Ok(&mut self.task_mut(id)?.context)
-    }
-
     fn task_mut(&mut self, id: TaskId) -> Result<&mut Task, TaskTableError> {
         self.entries
             .iter_mut()
