@@ -28,40 +28,46 @@ A version number does not imply support outside the documented hardware/software
 - [x] `v0.0.5` — basic PS/2 keyboard input through IRQ1.
 - [x] `v0.0.6` — task identity/state model with persistent runtime ownership.
 - [x] `v0.0.7` — initial round-robin scheduler policy driven by real 100 Hz PIT ticks, with a 5-tick quantum and runtime tick validation under QEMU.
+- [x] `v0.0.8` — controlled Ring 3 transition foundation with dedicated user code/stack mappings and verified privilege return through the kernel TSS stack.
+- [x] `v0.0.9` — minimal independent `no_std` ABI crate and experimental Ring 3 syscall entry/return path through vector `0x80`.
 
-### Next
-
-- [ ] `v0.0.8` — controlled Ring 3 transition foundation.
-- [ ] `v0.0.9` — minimal independent ABI and syscall entry path.
-
-The `v0.0.7` scheduler milestone validates timer-driven scheduling policy and task-state rotation. It does not yet provide full CPU context switching, independent task stacks, preemptive execution of multiple task bodies, processes, or userspace.
-
-The `v0.0.x` series is still kernel bring-up. It does not promise userspace compatibility, stable APIs, broad hardware support, or production security.
+The `v0.0.x` series established the first userspace boundary but remains kernel bring-up. Its userspace ABI is experimental and does not promise compatibility, a general syscall surface, process isolation, broad hardware support, or production security.
 
 ---
 
 ## `v0.1.0` — First isolated userspace
 
-### Target capabilities
+### Work already verified during `v0.1.0` development
 
-- preemptive scheduler foundation;
-- context switching between kernel tasks;
-- kernel stack lifecycle;
-- controlled transition to Ring 3;
-- syscall entry and return path;
-- minimal ABI crate independent of architecture-specific internals;
+- [x] architecture-level cooperative context save/restore for `rsp` and x86_64 callee-saved registers;
+- [x] fresh kernel-context preparation through an independent physical-frame-backed stack;
+- [x] two bootstrap/worker context-switch round trips under QEMU;
+- [x] existing Ring 3 syscall entry/return remains functional after the context-switch probe.
+
+These checks are **foundational evidence**, not completion of `v0.1.0`. The current `Task` model does not yet own saved contexts/stacks, and the PIT-driven scheduler does not yet perform CPU context switches.
+
+### Remaining target capabilities
+
+- preemptive scheduler foundation that actually switches execution contexts;
+- context/stack lifecycle integrated into kernel tasks;
+- repeated execution of multiple kernel task bodies;
 - first userspace `init` process;
 - minimal userspace shell;
-- basic process termination path.
+- basic process termination path;
+- syscall dispatch beyond the current entry/return probe where required by the first userspace program.
+
+Controlled Ring 3 transition, the experimental ABI crate, and the first syscall entry/return path were validated in `v0.0.8` and `v0.0.9`; `v0.1.0` must integrate them into a real task/process lifecycle rather than merely repeat the probes.
 
 ### Exit criteria
 
 - multiple tasks execute repeatedly without corrupting kernel state;
-- timer-driven scheduling is repeatable under QEMU;
+- timer-driven scheduling performs repeatable execution-context changes under QEMU;
+- task-owned kernel stack/context lifecycle is explicit;
 - Ring 3 code cannot directly perform privileged kernel operations;
-- syscall entry/return survives repeated calls;
+- syscall entry/return survives repeated calls from the first userspace program;
 - kernel and userspace stacks are clearly separated;
-- tests and documentation describe scheduler and privilege-transition invariants;
+- first userspace `init` and minimal shell execute through documented kernel interfaces;
+- tests and documentation describe scheduler, context, stack, and privilege-transition invariants;
 - CI and target build are green.
 
 ---
