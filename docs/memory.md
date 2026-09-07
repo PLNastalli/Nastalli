@@ -1,42 +1,84 @@
-# Memória física — v0.0.3
+# Physical Memory — v0.0.3
 
-## Escopo
+## Scope
 
-A v0.0.3 introduz o primeiro componente de gerenciamento de memória: um allocator linear de frames físicos de 4 KiB. Ele não é ainda um allocator de heap, não configura paginação e não modifica as tabelas criadas pelo bootloader.
+`v0.0.3` introduced Nastalli's first physical-memory management component: a linear allocator model for 4 KiB physical frames.
 
-## Fonte de autoridade
+It is **not** the kernel heap, does not configure page tables, and does not yet replace or rebuild the mappings established by the bootloader.
 
-O bootloader fornece `BootInfo.memory_regions`. Cada região tem endereço inicial inclusivo, endereço final exclusivo e um `MemoryRegionKind`.
+## Source of authority
 
-Somente regiões `Usable` podem ser entregues ao kernel. Regiões `Bootloader`, `UnknownUefi` e `UnknownBios` permanecem reservadas.
+The bootloader provides `BootInfo.memory_regions`. Each memory region has:
 
-## Invariantes
+- an inclusive start address;
+- an exclusive end address;
+- a `MemoryRegionKind`.
 
-- Todo frame começa em endereço múltiplo de `4096`.
-- O fim da região é tratado como exclusivo.
-- Bordas desalinhadas são descartadas, nunca arredondadas para dentro de uma região reservada.
-- Nenhum frame é retornado duas vezes pelo mesmo `FrameAllocator`.
-- Uma região não utilizável nunca produz um frame.
-- A ausência de frames retorna `None`; não há panic por exaustão.
+Only regions marked `Usable` are eligible to produce frames for the allocator.
 
-## Implementação atual
+Regions such as `Bootloader`, `UnknownUefi`, and `UnknownBios` remain unavailable to the allocator.
 
-`kernel::memory::FrameAllocator` mantém uma referência ao slice do bootloader, o índice da região atual e o próximo endereço. O custo de estado é constante; a busca atravessa regiões em ordem e não requer heap ou bitmap.
+## Invariants
+
+The current allocator is designed around these invariants:
+
+- every returned frame begins at an address aligned to `4096` bytes;
+- region ends are treated as exclusive;
+- misaligned boundaries are discarded conservatively rather than rounded into reserved memory;
+- one `FrameAllocator` instance does not return the same frame twice;
+- non-usable regions never produce allocatable frames;
+- exhaustion returns `None` rather than panicking.
+
+These invariants are more important than the current internal representation and should remain covered as the allocator evolves.
+
+## Current implementation
+
+`kernel::memory::FrameAllocator` holds a reference to the bootloader-provided memory-region slice, tracks the current region, and advances through eligible frame addresses.
 
 ```rust
 let mut allocator = FrameAllocator::new(&boot_info.memory_regions);
 let frame = allocator.allocate_frame();
 ```
 
-O tipo `PhysicalFrame` contém somente o endereço físico inicial. Ele ainda não é convertido em `x86_64::PhysFrame`, preservando a independência do kernel em relação a uma API específica de arquitetura.
+`PhysicalFrame` currently contains only the physical start address. It is intentionally not exposed as an `x86_64::PhysFrame`, keeping the generic kernel model from depending directly on an architecture-specific library type.
 
-## Limitações
+## Current usage
 
-- O kernel apenas conta frames durante a inicialização nesta versão.
-- Ainda não há reserva explícita das páginas ocupadas pelo próprio kernel.
-- Ainda não há bitmap persistente, desalocação, sincronização entre CPUs ou accounting por processo.
-- Essas extensões só devem entrar quando houver um consumidor real, como paginação ou heap.
+In the current boot flow, the kernel primarily uses the allocator model to inspect/count usable physical frames and validate the memory-management foundation.
 
-## Verificação
+The project does not yet rely on this allocator to manage a complete dynamic paging system.
 
-Os testes host cobrem alinhamento de bordas e rejeição de regiões do bootloader. O QEMU deve imprimir a quantidade de frames utilizáveis e continuar inicializando sem modificar a paginação fornecida pelo bootloader.
+## Current limitations
+
+As of `v0.0.6`:
+
+- there is no complete self-managed virtual-memory subsystem;
+- there is no frame deallocation API;
+- there is no persistent bitmap/buddy allocator;
+- there is no per-process memory accounting;
+- there is no SMP synchronization for frame allocation;
+- kernel/user address-space ownership does not yet exist;
+- explicit reservations and lifecycle rules will need to become stronger when Nastalli begins controlling page mappings itself.
+
+The allocator should evolve in response to real paging, process, heap-growth, and DMA consumers rather than being generalized prematurely.
+
+## Future direction
+
+Later memory milestones are expected to add:
+
+- virtual address-space management;
+- mapping/unmapping APIs;
+- page permissions;
+- process-owned mappings;
+- frame reclamation;
+- synchronization suitable for multicore systems;
+- explicit kernel/device/DMA ownership rules;
+- leak and lifetime validation.
+
+These are roadmap targets, not current features.
+
+## Verification
+
+Host tests cover boundary alignment and rejection of non-usable/bootloader regions. QEMU validation checks that the kernel reports usable physical-frame information and continues booting without replacing the bootloader-provided paging setup.
+
+See [`progress.md`](progress.md) for recorded version evidence.
