@@ -15,7 +15,13 @@ lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
         idt.breakpoint.set_handler_fn(breakpoint_handler);
+        idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
         idt.double_fault.set_handler_fn(double_fault_handler);
+        idt.invalid_tss.set_handler_fn(invalid_tss_handler);
+        idt.segment_not_present.set_handler_fn(segment_not_present_handler);
+        idt.stack_segment_fault.set_handler_fn(stack_segment_fault_handler);
+        idt.general_protection_fault
+            .set_handler_fn(general_protection_fault_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
         idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_handler);
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_handler);
@@ -92,9 +98,21 @@ fn trace(message: &[u8]) {
     }
 }
 
+fn fault(marker: &[u8]) -> ! {
+    trace(marker);
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
     crate::serial::write_byte(b'!');
     let _ = stack_frame;
+}
+
+extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
+    let _ = stack_frame;
+    fault(b"FAULT: UD\r\n");
 }
 
 extern "x86-interrupt" fn double_fault_handler(
@@ -102,9 +120,39 @@ extern "x86-interrupt" fn double_fault_handler(
     _error_code: u64,
 ) -> ! {
     let _ = stack_frame;
-    loop {
-        core::hint::spin_loop();
-    }
+    fault(b"FAULT: DF\r\n");
+}
+
+extern "x86-interrupt" fn invalid_tss_handler(
+    stack_frame: InterruptStackFrame,
+    _error_code: u64,
+) {
+    let _ = stack_frame;
+    fault(b"FAULT: TS\r\n");
+}
+
+extern "x86-interrupt" fn segment_not_present_handler(
+    stack_frame: InterruptStackFrame,
+    _error_code: u64,
+) {
+    let _ = stack_frame;
+    fault(b"FAULT: NP\r\n");
+}
+
+extern "x86-interrupt" fn stack_segment_fault_handler(
+    stack_frame: InterruptStackFrame,
+    _error_code: u64,
+) {
+    let _ = stack_frame;
+    fault(b"FAULT: SS\r\n");
+}
+
+extern "x86-interrupt" fn general_protection_fault_handler(
+    stack_frame: InterruptStackFrame,
+    _error_code: u64,
+) {
+    let _ = stack_frame;
+    fault(b"FAULT: GP\r\n");
 }
 
 extern "x86-interrupt" fn page_fault_handler(
@@ -112,9 +160,7 @@ extern "x86-interrupt" fn page_fault_handler(
     _error_code: PageFaultErrorCode,
 ) {
     let _ = stack_frame;
-    loop {
-        core::hint::spin_loop();
-    }
+    fault(b"FAULT: PF\r\n");
 }
 
 extern "x86-interrupt" fn timer_handler(_stack_frame: InterruptStackFrame) {
