@@ -1,4 +1,5 @@
 use crate::task::{TaskId, TaskState, TaskTable, TaskTableError};
+use nastalli_arch::context::Context;
 
 pub const DEFAULT_QUANTUM_TICKS: u64 = 5;
 
@@ -7,6 +8,11 @@ pub enum ScheduleDecision {
     Continue(TaskId),
     Switch { from: TaskId, to: TaskId },
     Idle,
+}
+
+pub struct PreparedContextSwitch {
+    pub(crate) current: *mut Context,
+    pub(crate) next: Context,
 }
 
 pub struct Scheduler {
@@ -75,6 +81,20 @@ impl Scheduler {
             from: current,
             to: next,
         }
+    }
+
+    pub fn prepare_context_switch(
+        &mut self,
+        decision: ScheduleDecision,
+    ) -> Result<PreparedContextSwitch, TaskTableError> {
+        let ScheduleDecision::Switch { from, to } = decision else {
+            panic!("context switch preparation requires a switch decision");
+        };
+
+        let next = self.tasks.context(to)?;
+        let current = self.tasks.context_mut(from)? as *mut Context;
+
+        Ok(PreparedContextSwitch { current, next })
     }
 }
 
