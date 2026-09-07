@@ -48,3 +48,15 @@ pub fn init() {
         load_tss(GDT.1.tss_selector);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use x86_64::PrivilegeLevel;
+
+    #[test]
+    fn user_selectors_have_ring3_rpl() {
+        let (code, data) = super::user_selectors();
+        assert_eq!(code.rpl(), PrivilegeLevel::Ring3);
+        assert_eq!(data.rpl(), PrivilegeLevel::Ring3);
+    }
+}
