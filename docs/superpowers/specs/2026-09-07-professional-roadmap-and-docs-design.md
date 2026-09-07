@@ -1,7 +1,7 @@
 # Nastalli professional roadmap and documentation design
 
 Date: 2026-09-07
-Status: Approved in chat; pending repository review before implementation
+Status: Approved and implemented on `main`
 
 ## Purpose
 
