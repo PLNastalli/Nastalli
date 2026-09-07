@@ -52,4 +52,5 @@ pub mod gdt;
 pub mod interrupts;
 pub mod keyboard;
 pub mod paging;
+pub mod preemption;
 pub mod user;

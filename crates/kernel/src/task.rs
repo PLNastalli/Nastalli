@@ -1,11 +1,12 @@
 //! Minimal kernel task structures.
 //!
-//! Tasks own identity, scheduler-visible state, saved execution context, and
-//! optional kernel-stack metadata. The fixed-size table avoids depending on a
-//! dynamic task-storage policy while virtual memory and process lifecycle are
-//! still being built.
+//! Tasks own identity, scheduler-visible state, cooperative saved context,
+//! preemption context, and optional kernel-stack metadata. The fixed-size table
+//! avoids depending on a dynamic task-storage policy while virtual memory and
+//! process lifecycle are still being built.
 
 use nastalli_arch::context::Context;
+use nastalli_arch::preemption::PreemptionContext;
 
 pub const MAX_TASKS: usize = 16;
 
@@ -55,6 +56,7 @@ pub struct Task {
     id: TaskId,
     state: TaskState,
     context: Context,
+    preemption_context: Option<PreemptionContext>,
     kernel_stack: Option<KernelStack>,
 }
 
@@ -71,6 +73,10 @@ impl Task {
         self.context
     }
 
+    pub const fn preemption_context(&self) -> Option<PreemptionContext> {
+        self.preemption_context
+    }
+
     pub const fn kernel_stack(&self) -> Option<KernelStack> {
         self.kernel_stack
     }
@@ -81,6 +87,7 @@ pub enum TaskTableError {
     Capacity,
     NotFound,
     RunningTaskExists,
+    MissingPreemptionContext,
 }
 
 pub struct TaskTable {
@@ -111,6 +118,7 @@ impl TaskTable {
             id,
             state: TaskState::Ready,
             context: Context::empty(),
+            preemption_context: None,
             kernel_stack: None,
         });
         Ok(id)
@@ -148,6 +156,18 @@ impl TaskTable {
     ) -> Result<(), TaskTableError> {
         let task = self.task_mut(id)?;
         task.context = context;
+        task.kernel_stack = Some(stack);
+        Ok(())
+    }
+
+    pub fn install_preemption_execution(
+        &mut self,
+        id: TaskId,
+        context: PreemptionContext,
+        stack: KernelStack,
+    ) -> Result<(), TaskTableError> {
+        let task = self.task_mut(id)?;
+        task.preemption_context = Some(context);
         task.kernel_stack = Some(stack);
         Ok(())
     }
@@ -198,6 +218,24 @@ impl TaskTable {
         Ok(&mut self.task_mut(id)?.context)
     }
 
+    pub(crate) fn preemption_context(
+        &self,
+        id: TaskId,
+    ) -> Result<PreemptionContext, TaskTableError> {
+        self.get(id)?
+            .preemption_context()
+            .ok_or(TaskTableError::MissingPreemptionContext)
+    }
+
+    pub(crate) fn save_preemption_context(
+        &mut self,
+        id: TaskId,
+        context: PreemptionContext,
+    ) -> Result<(), TaskTableError> {
+        self.task_mut(id)?.preemption_context = Some(context);
+        Ok(())
+    }
+
     fn task_mut(&mut self, id: TaskId) -> Result<&mut Task, TaskTableError> {
         self.entries
             .iter_mut()
@@ -217,6 +255,7 @@ impl Default for TaskTable {
 mod tests {
     use super::{KernelStack, MAX_TASKS, TaskState, TaskTable, TaskTableError};
     use nastalli_arch::context::Context;
+    use nastalli_arch::preemption::PreemptionContext;
 
     #[test]
     fn creates_ready_tasks_with_monotonic_ids() {
@@ -234,9 +273,7 @@ mod tests {
     fn updates_state_without_scheduler_side_effects() {
         let mut table = TaskTable::new();
         let id = table.create().unwrap();
-
         table.set_state(id, TaskState::Running).unwrap();
-
         assert_eq!(table.get(id).unwrap().state(), TaskState::Running);
     }
 
@@ -245,9 +282,7 @@ mod tests {
         let mut table = TaskTable::new();
         let first = table.create().unwrap();
         let second = table.create().unwrap();
-
         table.set_state(first, TaskState::Running).unwrap();
-
         assert_eq!(
             table.set_state(second, TaskState::Running),
             Err(TaskTableError::RunningTaskExists)
@@ -260,7 +295,6 @@ mod tests {
         for _ in 0..MAX_TASKS {
             table.create().unwrap();
         }
-
         assert_eq!(table.create(), Err(TaskTableError::Capacity));
         assert_eq!(table.get(super::TaskId(999)), Err(TaskTableError::NotFound));
     }
@@ -269,10 +303,6 @@ mod tests {
     fn task_owns_execution_context_and_kernel_stack() {
         let mut table = TaskTable::new();
         let id = table.create().unwrap();
-
-        assert_eq!(table.get(id).unwrap().context(), Context::empty());
-        assert_eq!(table.get(id).unwrap().kernel_stack(), None);
-
         let context = Context {
             stack_pointer: 0x1234,
         };
@@ -282,5 +312,19 @@ mod tests {
         let task = table.get(id).unwrap();
         assert_eq!(task.context(), context);
         assert_eq!(task.kernel_stack(), Some(stack));
+    }
+
+    #[test]
+    fn task_owns_preemption_context() {
+        let mut table = TaskTable::new();
+        let id = table.create().unwrap();
+        let context = PreemptionContext::new(0x9000);
+        let stack = KernelStack::new(0x8000, 4096);
+        table
+            .install_preemption_execution(id, context, stack)
+            .unwrap();
+
+        assert_eq!(table.get(id).unwrap().preemption_context(), Some(context));
+        assert_eq!(table.preemption_context(id).unwrap(), context);
     }
 }

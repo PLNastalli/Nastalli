@@ -1,5 +1,6 @@
 use crate::task::{TaskId, TaskState, TaskTable, TaskTableError};
 use nastalli_arch::context::Context;
+use nastalli_arch::preemption::{InterruptContext, PreemptionContext};
 
 pub const DEFAULT_QUANTUM_TICKS: u64 = 5;
 
@@ -93,8 +94,33 @@ impl Scheduler {
 
         let next = self.tasks.context(to)?;
         let current = self.tasks.context_mut(from)? as *mut Context;
-
         Ok(PreparedContextSwitch { current, next })
+    }
+
+    pub fn prepare_preemption_switch(
+        &mut self,
+        decision: ScheduleDecision,
+        interrupted: *mut InterruptContext,
+    ) -> Result<*mut InterruptContext, TaskTableError> {
+        let ScheduleDecision::Switch { from, to } = decision else {
+            return Ok(interrupted);
+        };
+
+        let next = match self.tasks.preemption_context(to) {
+            Ok(next) => next,
+            Err(error) => {
+                self.tasks.set_state(to, TaskState::Ready)?;
+                self.tasks.set_state(from, TaskState::Running)?;
+                self.current = Some(from);
+                return Err(error);
+            }
+        };
+
+        self.tasks.save_preemption_context(
+            from,
+            PreemptionContext::new(interrupted as usize as u64),
+        )?;
+        Ok(next.as_ptr())
     }
 }
 
@@ -103,6 +129,7 @@ mod tests {
     use super::{ScheduleDecision, Scheduler};
     use crate::task::{KernelStack, TaskState, TaskTable};
     use nastalli_arch::context::Context;
+    use nastalli_arch::preemption::{InterruptContext, PreemptionContext};
 
     #[test]
     fn rotates_ready_tasks_when_the_quantum_expires() {
@@ -130,18 +157,14 @@ mod tests {
         tasks
             .install_execution(
                 first,
-                Context {
-                    stack_pointer: 0x1111,
-                },
+                Context { stack_pointer: 0x1111 },
                 KernelStack::new(0x1000, 4096),
             )
             .unwrap();
         tasks
             .install_execution(
                 second,
-                Context {
-                    stack_pointer: 0x2222,
-                },
+                Context { stack_pointer: 0x2222 },
                 KernelStack::new(0x2000, 4096),
             )
             .unwrap();
@@ -153,5 +176,29 @@ mod tests {
 
         assert_eq!(prepared.next.stack_pointer, 0x2222);
         assert_eq!(unsafe { (*prepared.current).stack_pointer }, 0x1111);
+    }
+
+    #[test]
+    fn saves_interrupted_frame_and_selects_preemption_frame() {
+        let mut tasks = TaskTable::new();
+        let first = tasks.create().unwrap();
+        let second = tasks.create().unwrap();
+        tasks
+            .install_preemption_execution(
+                second,
+                PreemptionContext::new(0x2220),
+                KernelStack::new(0x2000, 4096),
+            )
+            .unwrap();
+        tasks.set_state(first, TaskState::Running).unwrap();
+
+        let mut scheduler = Scheduler::with_quantum(tasks, 1);
+        let decision = scheduler.on_tick();
+        let interrupted = 0x1110usize as *mut InterruptContext;
+        let next = scheduler
+            .prepare_preemption_switch(decision, interrupted)
+            .unwrap();
+
+        assert_eq!(next as usize, 0x2220);
     }
 }

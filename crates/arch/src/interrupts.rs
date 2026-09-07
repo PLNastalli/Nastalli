@@ -1,9 +1,11 @@
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin::Mutex;
-use x86_64::PrivilegeLevel;
+use x86_64::{PrivilegeLevel, VirtAddr};
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
+
+use crate::preemption::InterruptContext;
 
 const PIC_1_OFFSET: u8 = 32;
 const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
@@ -11,6 +13,9 @@ const PIT_FREQUENCY_HZ: u32 = 1_193_182;
 pub const TIMER_FREQUENCY_HZ: u32 = 100;
 
 static TICKS: AtomicU64 = AtomicU64::new(0);
+static TIMER_PREEMPTION_HOOK: AtomicUsize = AtomicUsize::new(0);
+
+pub type TimerPreemptionHook = extern "C" fn(*mut InterruptContext) -> *mut InterruptContext;
 
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
@@ -28,7 +33,11 @@ lazy_static! {
         idt.general_protection_fault
             .set_handler_fn(general_protection_fault_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
-        idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_handler);
+        unsafe {
+            idt[InterruptIndex::Timer.as_usize()].set_handler_addr(VirtAddr::new(
+                crate::preemption::timer_entry_address(),
+            ));
+        }
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_handler);
         idt[nastalli_abi::SYSCALL_VECTOR as usize]
             .set_handler_fn(syscall_handler)
@@ -80,6 +89,23 @@ pub fn init() {
 
 pub fn ticks() -> u64 {
     TICKS.load(Ordering::Relaxed)
+}
+
+/// Installs the callback used by the raw timer interrupt entry after it has saved
+/// the interrupted Ring 0 general-purpose register frame.
+///
+/// # Safety
+///
+/// The callback executes with interrupts disabled on the interrupted task's
+/// kernel stack. It must remain valid until `clear_timer_preemption_hook` is
+/// called, must not unwind, and must return either the supplied frame or another
+/// valid frame compatible with `crate::preemption::InterruptContext`.
+pub unsafe fn install_timer_preemption_hook(hook: TimerPreemptionHook) {
+    TIMER_PREEMPTION_HOOK.store(hook as usize, Ordering::Release);
+}
+
+pub fn clear_timer_preemption_hook() {
+    TIMER_PREEMPTION_HOOK.store(0, Ordering::Release);
 }
 
 pub const fn pit_divisor(frequency_hz: u32) -> u16 {
@@ -191,9 +217,17 @@ extern "x86-interrupt" fn page_fault_handler(
     fault(b"FAULT: PF\r\n");
 }
 
-extern "x86-interrupt" fn timer_handler(_stack_frame: InterruptStackFrame) {
+pub(crate) extern "C" fn timer_dispatch(frame: *mut InterruptContext) -> *mut InterruptContext {
     TICKS.fetch_add(1, Ordering::Relaxed);
     unsafe { send_end_of_interrupt(InterruptIndex::Timer.as_u8()) };
+
+    let hook_address = TIMER_PREEMPTION_HOOK.load(Ordering::Acquire);
+    if hook_address == 0 {
+        return frame;
+    }
+
+    let hook: TimerPreemptionHook = unsafe { core::mem::transmute(hook_address) };
+    hook(frame)
 }
 
 extern "x86-interrupt" fn keyboard_handler(_stack_frame: InterruptStackFrame) {

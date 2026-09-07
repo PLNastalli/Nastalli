@@ -47,10 +47,9 @@ jobs:
           grep -F "NASTALLI OS v0.0.9" qemu.log
           grep -F "Scheduler initialized: round-robin, 5 tick quantum." qemu.log
           grep -F "Scheduler timer active: first PIT tick observed." qemu.log
-          grep -F "Task switch: worker entered." qemu.log
-          grep -F "Task switch: bootstrap resumed." qemu.log
-          grep -F "Task switch: worker resumed." qemu.log
-          grep -F "Task switch: bootstrap resumed twice." qemu.log
+          grep -F "Preemption: worker executed without yielding." qemu.log
+          grep -F "Preemption: four IRQ-driven task switches observed." qemu.log
+          grep -F "Preemption: bootstrap resumed twice." qemu.log
           grep -F "Ring 3 syscall entered kernel and returned." qemu.log
           grep -F "Ring 3 probe reached kernel breakpoint." qemu.log
 

@@ -3,6 +3,7 @@
 
 use bootloader_api::BootInfo;
 use core::fmt::Write;
+use core::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
 
 pub mod heap;
 pub mod memory;
@@ -11,6 +12,13 @@ pub mod task;
 
 const USER_CODE_ADDRESS: u64 = 0x0000_0000_4000_0000;
 const USER_STACK_ADDRESS: u64 = 0x0000_0000_4001_0000;
+const PREEMPTION_TIMEOUT_TICKS: u64 = 200;
+
+static PREEMPTION_SCHEDULER: AtomicPtr<scheduler::Scheduler> =
+    AtomicPtr::new(core::ptr::null_mut());
+static PREEMPTION_SWITCHES: AtomicU64 = AtomicU64::new(0);
+static WORKER_HEARTBEATS: AtomicU64 = AtomicU64::new(0);
+static BOOTSTRAP_HEARTBEATS: AtomicU64 = AtomicU64::new(0);
 
 struct UserProbe {
     entry: u64,
@@ -106,7 +114,7 @@ fn prepare_scheduler_runtime(
     allocator: &mut memory::FrameAllocator<'_>,
 ) -> *mut scheduler::Scheduler {
     let scheduler_frame = allocator.allocate_frame().expect("scheduler runtime frame");
-    let worker_frame = allocator.allocate_frame().expect("task worker stack frame");
+    let worker_frame = allocator.allocate_frame().expect("preemptive worker stack frame");
 
     unsafe {
         nastalli_arch::paging::zero_frame(physical_memory_offset, scheduler_frame.start_address);
@@ -122,18 +130,18 @@ fn prepare_scheduler_runtime(
         .expect("worker stack virtual address overflow") as *mut u8;
 
     let worker_task = tasks.create().expect("worker task slot");
-    let worker_context = unsafe {
-        nastalli_arch::context::prepare(
+    let worker_preemption = unsafe {
+        nastalli_arch::preemption::prepare_kernel_task(
             worker_stack,
             memory::PAGE_SIZE as usize,
-            task_switch_worker,
-            scheduler_ptr.cast(),
+            preemptive_worker,
+            core::ptr::null_mut(),
         )
     };
     tasks
-        .install_execution(
+        .install_preemption_execution(
             worker_task,
-            worker_context,
+            worker_preemption,
             task::KernelStack::new(worker_stack as u64, memory::PAGE_SIZE as usize),
         )
         .expect("worker task exists");
@@ -144,56 +152,63 @@ fn prepare_scheduler_runtime(
     scheduler_ptr
 }
 
-fn wait_for_prepared_switch(
-    scheduler_ptr: *mut scheduler::Scheduler,
-) -> scheduler::PreparedContextSwitch {
-    let mut observed_ticks = nastalli_arch::interrupts::ticks();
+extern "C" fn timer_preemption_hook(
+    interrupted: *mut nastalli_arch::preemption::InterruptContext,
+) -> *mut nastalli_arch::preemption::InterruptContext {
+    let scheduler_ptr = PREEMPTION_SCHEDULER.load(Ordering::Acquire);
+    if scheduler_ptr.is_null() {
+        return interrupted;
+    }
 
-    loop {
-        let now = nastalli_arch::interrupts::ticks();
-        while observed_ticks < now {
-            observed_ticks = observed_ticks.saturating_add(1);
-            let decision = unsafe { (*scheduler_ptr).on_tick() };
-            if matches!(decision, scheduler::ScheduleDecision::Switch { .. }) {
-                return unsafe {
-                    (*scheduler_ptr)
-                        .prepare_context_switch(decision)
-                        .expect("scheduled tasks own contexts")
-                };
-            }
+    let scheduler = unsafe { &mut *scheduler_ptr };
+    let decision = scheduler.on_tick();
+    if !matches!(decision, scheduler::ScheduleDecision::Switch { .. }) {
+        return interrupted;
+    }
+
+    match scheduler.prepare_preemption_switch(decision, interrupted) {
+        Ok(next) => {
+            PREEMPTION_SWITCHES.fetch_add(1, Ordering::Relaxed);
+            next
         }
-        core::hint::spin_loop();
+        Err(_) => interrupted,
     }
 }
 
-unsafe fn execute_prepared_switch(prepared: scheduler::PreparedContextSwitch) {
-    let current = unsafe { &mut *prepared.current };
-    unsafe { nastalli_arch::context::switch(current, &prepared.next) };
+fn run_preemption_probe(serial: &mut impl Write, scheduler_ptr: *mut scheduler::Scheduler) {
+    PREEMPTION_SCHEDULER.store(scheduler_ptr, Ordering::Release);
+    PREEMPTION_SWITCHES.store(0, Ordering::Relaxed);
+    WORKER_HEARTBEATS.store(0, Ordering::Relaxed);
+    BOOTSTRAP_HEARTBEATS.store(0, Ordering::Relaxed);
+
+    let start_ticks = nastalli_arch::interrupts::ticks();
+    unsafe {
+        nastalli_arch::interrupts::install_timer_preemption_hook(timer_preemption_hook);
+    }
+
+    while PREEMPTION_SWITCHES.load(Ordering::Acquire) < 4 {
+        BOOTSTRAP_HEARTBEATS.fetch_add(1, Ordering::Relaxed);
+        if nastalli_arch::interrupts::ticks().saturating_sub(start_ticks) > PREEMPTION_TIMEOUT_TICKS {
+            nastalli_arch::interrupts::clear_timer_preemption_hook();
+            PREEMPTION_SCHEDULER.store(core::ptr::null_mut(), Ordering::Release);
+            panic!("IRQ-driven preemption proof timed out");
+        }
+        core::hint::spin_loop();
+    }
+
+    nastalli_arch::interrupts::clear_timer_preemption_hook();
+    PREEMPTION_SCHEDULER.store(core::ptr::null_mut(), Ordering::Release);
+
+    assert!(WORKER_HEARTBEATS.load(Ordering::Acquire) > 0);
+    assert!(BOOTSTRAP_HEARTBEATS.load(Ordering::Acquire) > 0);
+    let _ = writeln!(serial, "Preemption: worker executed without yielding.");
+    let _ = writeln!(serial, "Preemption: four IRQ-driven task switches observed.");
+    let _ = writeln!(serial, "Preemption: bootstrap resumed twice.");
 }
 
-fn run_task_switch_probe(serial: &mut impl Write, scheduler_ptr: *mut scheduler::Scheduler) {
-    let first = wait_for_prepared_switch(scheduler_ptr);
-    unsafe { execute_prepared_switch(first) };
-    let _ = writeln!(serial, "Task switch: bootstrap resumed.");
-
-    let second = wait_for_prepared_switch(scheduler_ptr);
-    unsafe { execute_prepared_switch(second) };
-    let _ = writeln!(serial, "Task switch: bootstrap resumed twice.");
-}
-
-extern "C" fn task_switch_worker(argument: *mut ()) -> ! {
-    let scheduler_ptr = argument.cast::<scheduler::Scheduler>();
-    let mut serial = nastalli_hal::serial::Serial::init();
-    let _ = writeln!(serial, "Task switch: worker entered.");
-
-    let first = wait_for_prepared_switch(scheduler_ptr);
-    unsafe { execute_prepared_switch(first) };
-
-    let _ = writeln!(serial, "Task switch: worker resumed.");
-    let second = wait_for_prepared_switch(scheduler_ptr);
-    unsafe { execute_prepared_switch(second) };
-
+extern "C" fn preemptive_worker(_argument: *mut ()) -> ! {
     loop {
+        WORKER_HEARTBEATS.fetch_add(1, Ordering::Relaxed);
         core::hint::spin_loop();
     }
 }
@@ -261,16 +276,15 @@ fn run(
         }
         core::hint::spin_loop();
     }
-
-    let _ = unsafe { (*scheduler_ptr).on_tick() };
     let _ = writeln!(serial, "Scheduler timer active: first PIT tick observed.");
 
-    run_task_switch_probe(serial, scheduler_ptr);
+    run_preemption_probe(serial, scheduler_ptr);
     let user_probe = prepare_ring3_probe(physical_memory_offset, allocator);
     unsafe { nastalli_arch::user::enter(user_probe.entry, user_probe.stack_top) }
 }
 
 pub fn panic(info: &core::panic::PanicInfo) -> ! {
+    nastalli_arch::interrupts::clear_timer_preemption_hook();
     let mut serial = nastalli_hal::serial::Serial::init();
     let _ = writeln!(serial, "kernel panic: {info}");
     loop {

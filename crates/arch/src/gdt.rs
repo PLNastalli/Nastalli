@@ -22,9 +22,6 @@ impl<const N: usize> WritableStack<N> {
     }
 }
 
-// These stacks are written by the CPU while switching privilege levels or
-// entering an IST. UnsafeCell keeps their backing storage in writable memory;
-// Rust never creates shared references to the bytes while the CPU uses them.
 unsafe impl<const N: usize> Sync for WritableStack<N> {}
 
 static DOUBLE_FAULT_STACK: WritableStack<DOUBLE_FAULT_STACK_SIZE> = WritableStack::new();
@@ -44,13 +41,16 @@ lazy_static! {
         let user_data_selector = gdt.add_entry(Descriptor::user_data_segment());
         let user_code_selector = gdt.add_entry(Descriptor::user_code_segment());
         let tss_selector = gdt.add_entry(Descriptor::tss_segment(&TSS));
-        (gdt, Selectors {
-            code_selector,
-            data_selector,
-            user_data_selector,
-            user_code_selector,
-            tss_selector,
-        })
+        (
+            gdt,
+            Selectors {
+                code_selector,
+                data_selector,
+                user_data_selector,
+                user_code_selector,
+                tss_selector,
+            },
+        )
     };
 }
 
@@ -78,6 +78,10 @@ pub fn init() {
     }
 }
 
+pub fn kernel_code_selector() -> SegmentSelector {
+    GDT.1.code_selector
+}
+
 pub fn user_selectors() -> (SegmentSelector, SegmentSelector) {
     (GDT.1.user_code_selector, GDT.1.user_data_selector)
 }
@@ -85,6 +89,14 @@ pub fn user_selectors() -> (SegmentSelector, SegmentSelector) {
 #[cfg(test)]
 mod tests {
     use x86_64::PrivilegeLevel;
+
+    #[test]
+    fn kernel_code_selector_has_ring0_rpl() {
+        assert_eq!(
+            super::kernel_code_selector().rpl(),
+            PrivilegeLevel::Ring0
+        );
+    }
 
     #[test]
     fn user_selectors_have_ring3_rpl() {
