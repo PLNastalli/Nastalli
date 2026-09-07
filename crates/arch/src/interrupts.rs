@@ -30,6 +30,9 @@ lazy_static! {
         idt.page_fault.set_handler_fn(page_fault_handler);
         idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_handler);
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_handler);
+        idt[nastalli_abi::SYSCALL_VECTOR as usize]
+            .set_handler_fn(syscall_handler)
+            .set_privilege_level(PrivilegeLevel::Ring3);
         idt
     };
     static ref PICS: Mutex<ChainedPics> =
@@ -126,6 +129,10 @@ extern "x86-interrupt" fn breakpoint_handler(_stack_frame: InterruptStackFrame) 
     loop {
         core::hint::spin_loop();
     }
+}
+
+extern "x86-interrupt" fn syscall_handler(_stack_frame: InterruptStackFrame) {
+    trace(b"Ring 3 syscall entered kernel and returned.\r\n");
 }
 
 extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
