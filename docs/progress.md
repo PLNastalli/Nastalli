@@ -2,6 +2,37 @@
 
 Este arquivo registra o que foi implementado, por que foi implementado e quais evidências existem. Cada versão deve ser concluída antes do início da seguinte.
 
+## v0.0.6 — Estrutura de tarefas
+
+### Objetivo
+
+Criar um contrato mínimo para identidade e estado de tarefas sem iniciar ainda scheduler, troca de contexto ou userspace.
+
+### Implementado
+
+- `crates/kernel/src/task.rs` com `TaskId`, `TaskState`, `Task` e `TaskTable`.
+- Tabela fixa de 16 tarefas, sem alocação dinâmica.
+- IDs monotônicos e operações explícitas de criação, consulta e mudança de estado.
+- Tarefa bootstrap criada durante a inicialização e marcada como `Running` apenas de forma descritiva.
+- Testes para criação, transição de estado, capacidade e tarefas ausentes.
+- Documentação dedicada em `docs/tasks.md`.
+
+### Limites
+
+- O PIT continua configurado, mas a IRQ0 permanece mascarada.
+- Ainda não há scheduler, preempção, contexto salvo, stack própria ou processos.
+
+### Verificação
+
+- `cargo fmt --all -- --check`: aprovado.
+- `cargo xtask test`: 1 teste de `arch`, 2 de `hal` e 6 do `kernel` passaram.
+- `cargo check` dos crates aplicáveis: aprovado.
+- `cargo clippy ... -- -D warnings`: aprovado.
+- `cargo xtask build`: kernel x86_64 compilado.
+- `cargo xtask run` com QEMU + OVMF: boot aprovado.
+- Saída observada: `NASTALLI OS v0.0.6`, `Physical memory: 30269 usable frames.` e `Task table initialized: 1 task.`
+- O QEMU foi encerrado por timeout controlado após a validação, pois o kernel permanece em loop infinito.
+
 ## v0.0.5 — Teclado PS/2
 
 ### Objetivo

@@ -12,7 +12,7 @@ Cada etapa precisa compilar e ser observável antes da próxima começar. O road
 
 ## Próximas etapas
 
-- [ ] `v0.0.6` — estrutura de tarefas sem scheduler preemptivo completo.
+- [x] `v0.0.6` — estrutura de tarefas sem scheduler preemptivo completo.
 - [ ] `v0.0.7` — scheduler inicial usando os ticks do PIT.
 - [ ] `v0.0.8` — transição controlada para ring 3.
 - [ ] `v0.0.9` — ABI e syscalls mínimas, em crate independente.

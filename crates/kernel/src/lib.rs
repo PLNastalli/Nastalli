@@ -6,10 +6,11 @@ use core::fmt::Write;
 
 pub mod heap;
 pub mod memory;
+pub mod task;
 
 pub fn start(boot_info: &'static mut BootInfo) -> ! {
     let mut serial = nastalli_hal::serial::Serial::init();
-    let _ = writeln!(serial, "NASTALLI OS v0.0.5");
+    let _ = writeln!(serial, "NASTALLI OS v0.0.6");
     let _ = writeln!(serial, "Architecture: {}", nastalli_arch::NAME);
     let _ = writeln!(serial, "Boot: UEFI");
     let _ = writeln!(serial, "Kernel initialized successfully.");
@@ -31,6 +32,13 @@ pub fn start(boot_info: &'static mut BootInfo) -> ! {
         allocator.total_usable_frames()
     };
     let _ = writeln!(serial, "Physical memory: {usable_frames} usable frames.");
+
+    let mut tasks = task::TaskTable::new();
+    let bootstrap_task = tasks.create().expect("bootstrap task slot");
+    tasks
+        .set_state(bootstrap_task, task::TaskState::Running)
+        .expect("bootstrap task exists");
+    let _ = writeln!(serial, "Task table initialized: {} task.", tasks.len());
 
     if let Some(framebuffer) = boot_info.framebuffer.as_mut() {
         let info = framebuffer.info();

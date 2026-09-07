@@ -12,11 +12,11 @@ Sistema operacional próprio, escrito principalmente em Rust, começando por x86
 
 ## Estado atual
 
-**Versão:** `v0.0.5`  
-**Status:** boot validado em QEMU + OVMF  
-**Próxima versão:** `v0.0.6`, estrutura inicial de tarefas
+**Versão:** `v0.0.6`
+**Status:** boot validado em QEMU + OVMF
+**Próxima versão:** `v0.0.7`, scheduler inicial
 
-A versão atual entra no kernel Rust `no_std`, inicializa GDT/TSS, IDT, PIC 8259 e PIT a 100 Hz, captura teclado PS/2 pela IRQ1, conta frames físicos utilizáveis a partir do `BootInfo`, inicializa uma heap estática de 64 KiB, acessa o framebuffer e escreve diagnóstico pela serial COM1.
+A versão atual entra no kernel Rust `no_std`, inicializa GDT/TSS, IDT, PIC 8259 e PIT a 100 Hz, captura teclado PS/2 pela IRQ1, conta frames físicos utilizáveis a partir do `BootInfo`, inicializa uma heap estática de 64 KiB, cria a tabela inicial de tarefas, acessa o framebuffer e escreve diagnóstico pela serial COM1.
 
 ## Arquitetura
 

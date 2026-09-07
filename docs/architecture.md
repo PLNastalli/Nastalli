@@ -4,7 +4,7 @@
 
 O framebuffer é recebido por `BootInfo` e usado diretamente apenas pela inicialização gráfica mínima. Uma abstração de framebuffer só será criada quando houver um segundo consumidor real.
 
-Não existem ABI, userspace, scheduler, syscalls, filesystem ou drivers complexos na v0.0.3. A v0.0.3 adiciona um allocator de frames físicos de 4 KiB baseado no mapa do bootloader, sem alterar paginação ou criar heap.
+Não existem ABI, userspace, scheduler, syscalls, filesystem ou drivers complexos na v0.0.6. A v0.0.6 adiciona apenas o modelo de tarefas em `kernel::task`, sem troca de contexto ou preempção.
 
 ## Propriedade e segurança
 

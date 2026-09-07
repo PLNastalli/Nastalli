@@ -13,6 +13,7 @@ Esta documentação é parte do projeto, não um texto separado do código. Ela 
 | [unsafe-policy.md](unsafe-policy.md) | Regras para código unsafe e assembly |
 | [security-model.md](security-model.md) | Posse do dispositivo, confiança, chaves e limites de segurança |
 | [input.md](input.md) | Teclado PS/2 e fluxo de input |
+| [tasks.md](tasks.md) | Modelo inicial de tarefas e limites da v0.0.6 |
 | [superpowers/specs/2026-09-06-novaos-v001-design.md](superpowers/specs/2026-09-06-novaos-v001-design.md) | Design aprovado da fundação v0.0.1 |
 
 ## Como manter

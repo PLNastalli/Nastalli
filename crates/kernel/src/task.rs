@@ -1,0 +1,150 @@
+//! Estruturas mínimas de tarefas do kernel.
+//!
+//! Esta versão descreve identidade e estado, mas não faz escalonamento nem
+//! troca de contexto. A tabela fixa evita depender de uma política de
+//! alocação enquanto a memória virtual ainda está sendo construída.
+
+pub const MAX_TASKS: usize = 16;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TaskId(u64);
+
+impl TaskId {
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskState {
+    Ready,
+    Running,
+    Blocked,
+    Terminated,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Task {
+    id: TaskId,
+    state: TaskState,
+}
+
+impl Task {
+    pub const fn id(self) -> TaskId {
+        self.id
+    }
+
+    pub const fn state(self) -> TaskState {
+        self.state
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskTableError {
+    Capacity,
+    NotFound,
+}
+
+pub struct TaskTable {
+    entries: [Option<Task>; MAX_TASKS],
+    next_id: u64,
+}
+
+impl TaskTable {
+    pub const fn new() -> Self {
+        Self {
+            entries: [None; MAX_TASKS],
+            next_id: 0,
+        }
+    }
+
+    pub fn create(&mut self) -> Result<TaskId, TaskTableError> {
+        let slot = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.is_none())
+            .ok_or(TaskTableError::Capacity)?;
+        let id = TaskId(self.next_id);
+        self.next_id = self
+            .next_id
+            .checked_add(1)
+            .ok_or(TaskTableError::Capacity)?;
+        *slot = Some(Task {
+            id,
+            state: TaskState::Ready,
+        });
+        Ok(id)
+    }
+
+    pub fn get(&self, id: TaskId) -> Result<Task, TaskTableError> {
+        self.entries
+            .iter()
+            .flatten()
+            .find(|task| task.id == id)
+            .copied()
+            .ok_or(TaskTableError::NotFound)
+    }
+
+    pub fn set_state(&mut self, id: TaskId, state: TaskState) -> Result<(), TaskTableError> {
+        let task = self
+            .entries
+            .iter_mut()
+            .flatten()
+            .find(|task| task.id == id)
+            .ok_or(TaskTableError::NotFound)?;
+        task.state = state;
+        Ok(())
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.iter().flatten().count()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl Default for TaskTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_TASKS, TaskState, TaskTable, TaskTableError};
+
+    #[test]
+    fn creates_ready_tasks_with_monotonic_ids() {
+        let mut table = TaskTable::new();
+        let first = table.create().unwrap();
+        let second = table.create().unwrap();
+
+        assert_eq!(first.raw(), 0);
+        assert_eq!(second.raw(), 1);
+        assert_eq!(table.get(first).unwrap().state(), TaskState::Ready);
+        assert_eq!(table.len(), 2);
+    }
+
+    #[test]
+    fn updates_state_without_scheduler_side_effects() {
+        let mut table = TaskTable::new();
+        let id = table.create().unwrap();
+
+        table.set_state(id, TaskState::Running).unwrap();
+
+        assert_eq!(table.get(id).unwrap().state(), TaskState::Running);
+    }
+
+    #[test]
+    fn reports_capacity_and_missing_tasks() {
+        let mut table = TaskTable::new();
+        for _ in 0..MAX_TASKS {
+            table.create().unwrap();
+        }
+
+        assert_eq!(table.create(), Err(TaskTableError::Capacity));
+        assert_eq!(table.get(super::TaskId(999)), Err(TaskTableError::NotFound));
+    }
+}
