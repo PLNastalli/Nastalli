@@ -6,6 +6,11 @@ use x86_64::{PhysAddr, VirtAddr};
 
 const PAGE_SIZE: usize = 4096;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UserPageMapError {
+    MappingFailed,
+}
+
 struct CallbackFrameAllocator<'a, F> {
     allocate: &'a mut F,
 }
@@ -28,23 +33,43 @@ unsafe fn active_mapper(physical_memory_offset: u64) -> OffsetPageTable<'static>
     unsafe { OffsetPageTable::new(level_4_table, physical_memory_offset) }
 }
 
+/// Clears one physical 4 KiB frame through the bootloader physical-memory mapping.
+///
+/// # Safety
+///
+/// `physical_memory_offset` must map physical memory into the current address space, and
+/// `physical_address` must name a writable 4 KiB frame exclusively owned by the caller.
 pub unsafe fn zero_frame(physical_memory_offset: u64, physical_address: u64) {
     let pointer = (physical_memory_offset + physical_address) as *mut u8;
     unsafe { core::ptr::write_bytes(pointer, 0, PAGE_SIZE) };
 }
 
+/// Copies bytes into one physical frame through the bootloader physical-memory mapping.
+///
+/// # Safety
+///
+/// `physical_memory_offset` must map physical memory into the current address space.
+/// `physical_address` must name a writable 4 KiB frame exclusively owned by the caller, and
+/// the supplied byte slice must be valid for the duration of the copy.
 pub unsafe fn write_frame_bytes(physical_memory_offset: u64, physical_address: u64, bytes: &[u8]) {
     assert!(bytes.len() <= PAGE_SIZE);
     let pointer = (physical_memory_offset + physical_address) as *mut u8;
     unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), pointer, bytes.len()) };
 }
 
+/// Maps one user-executable, read-only 4 KiB page into the active address space.
+///
+/// # Safety
+///
+/// The virtual page must be unused, `physical_address` must identify a valid owned 4 KiB frame,
+/// `physical_memory_offset` must describe the active physical-memory mapping, and every frame
+/// returned by `allocate_frame` must be unused and exclusively available for page tables.
 pub unsafe fn map_user_code_page<F>(
     virtual_address: u64,
     physical_address: u64,
     physical_memory_offset: u64,
     allocate_frame: &mut F,
-) -> Result<(), ()>
+) -> Result<(), UserPageMapError>
 where
     F: FnMut() -> Option<u64>,
 {
@@ -59,12 +84,19 @@ where
     }
 }
 
+/// Maps one writable, non-executable user stack page into the active address space.
+///
+/// # Safety
+///
+/// The virtual page must be unused, `physical_address` must identify a valid owned 4 KiB frame,
+/// `physical_memory_offset` must describe the active physical-memory mapping, and every frame
+/// returned by `allocate_frame` must be unused and exclusively available for page tables.
 pub unsafe fn map_user_stack_page<F>(
     virtual_address: u64,
     physical_address: u64,
     physical_memory_offset: u64,
     allocate_frame: &mut F,
-) -> Result<(), ()>
+) -> Result<(), UserPageMapError>
 where
     F: FnMut() -> Option<u64>,
 {
@@ -88,7 +120,7 @@ unsafe fn map_page<F>(
     physical_memory_offset: u64,
     flags: PageTableFlags,
     allocate_frame: &mut F,
-) -> Result<(), ()>
+) -> Result<(), UserPageMapError>
 where
     F: FnMut() -> Option<u64>,
 {
@@ -102,7 +134,7 @@ where
     let mut mapper = unsafe { active_mapper(physical_memory_offset) };
     let flush =
         unsafe { mapper.map_to_with_table_flags(page, frame, flags, parent_flags, &mut allocator) }
-            .map_err(|_| ())?;
+            .map_err(|_| UserPageMapError::MappingFailed)?;
     flush.flush();
     Ok(())
 }
