@@ -85,6 +85,7 @@ fn paint_framebuffer(boot_info: &mut BootInfo) {
 fn run(serial: &mut impl Write, tasks: task::TaskTable) -> ! {
     let mut scheduler = scheduler::Scheduler::new(tasks);
     let mut observed_ticks = nastalli_arch::interrupts::ticks();
+    let mut timer_observed = false;
     let _ = writeln!(
         serial,
         "Scheduler initialized: round-robin, {} tick quantum.",
@@ -96,6 +97,11 @@ fn run(serial: &mut impl Write, tasks: task::TaskTable) -> ! {
         while observed_ticks != current_ticks {
             observed_ticks = observed_ticks.wrapping_add(1);
             let _ = scheduler.on_tick();
+
+            if !timer_observed {
+                let _ = writeln!(serial, "Scheduler timer active: first PIT tick observed.");
+                timer_observed = true;
+            }
         }
 
         if let Some(key) = nastalli_hal::keyboard::take_key() {
