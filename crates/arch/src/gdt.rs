@@ -41,16 +41,13 @@ lazy_static! {
         let user_data_selector = gdt.add_entry(Descriptor::user_data_segment());
         let user_code_selector = gdt.add_entry(Descriptor::user_code_segment());
         let tss_selector = gdt.add_entry(Descriptor::tss_segment(&TSS));
-        (
-            gdt,
-            Selectors {
-                code_selector,
-                data_selector,
-                user_data_selector,
-                user_code_selector,
-                tss_selector,
-            },
-        )
+        (gdt, Selectors {
+            code_selector,
+            data_selector,
+            user_data_selector,
+            user_code_selector,
+            tss_selector,
+        })
     };
 }
 
@@ -92,10 +89,7 @@ mod tests {
 
     #[test]
     fn kernel_code_selector_has_ring0_rpl() {
-        assert_eq!(
-            super::kernel_code_selector().rpl(),
-            PrivilegeLevel::Ring0
-        );
+        assert_eq!(super::kernel_code_selector().rpl(), PrivilegeLevel::Ring0);
     }
 
     #[test]
