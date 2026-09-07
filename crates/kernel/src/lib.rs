@@ -36,12 +36,7 @@ pub fn start(boot_info: &'static mut BootInfo) -> ! {
         .into_option()
         .expect("physical memory mapping enabled by boot configuration");
     let mut allocator = memory::FrameAllocator::new(&boot_info.memory_regions);
-    run(
-        &mut serial,
-        tasks,
-        physical_memory_offset,
-        &mut allocator,
-    );
+    run(&mut serial, tasks, physical_memory_offset, &mut allocator);
 }
 
 fn write_banner(serial: &mut impl Write) {
