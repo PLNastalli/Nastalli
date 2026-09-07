@@ -105,12 +105,8 @@ fn prepare_scheduler_runtime(
     physical_memory_offset: u64,
     allocator: &mut memory::FrameAllocator<'_>,
 ) -> *mut scheduler::Scheduler {
-    let scheduler_frame = allocator
-        .allocate_frame()
-        .expect("scheduler runtime frame");
-    let worker_frame = allocator
-        .allocate_frame()
-        .expect("task worker stack frame");
+    let scheduler_frame = allocator.allocate_frame().expect("scheduler runtime frame");
+    let worker_frame = allocator.allocate_frame().expect("task worker stack frame");
 
     unsafe {
         nastalli_arch::paging::zero_frame(physical_memory_offset, scheduler_frame.start_address);
@@ -123,8 +119,7 @@ fn prepare_scheduler_runtime(
         as *mut scheduler::Scheduler;
     let worker_stack = physical_memory_offset
         .checked_add(worker_frame.start_address)
-        .expect("worker stack virtual address overflow")
-        as *mut u8;
+        .expect("worker stack virtual address overflow") as *mut u8;
 
     let worker_task = tasks.create().expect("worker task slot");
     let worker_context = unsafe {
