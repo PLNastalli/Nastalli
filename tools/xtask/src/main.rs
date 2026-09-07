@@ -89,6 +89,14 @@ fn run_qemu() -> io::Result<()> {
         display,
     ]);
 
+    if env::var_os("NASTALLI_QEMU_DEBUG").is_some() {
+        args.extend([
+            "-d".to_owned(),
+            "int,cpu_reset".to_owned(),
+            "-no-reboot".to_owned(),
+        ]);
+    }
+
     let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
     command("qemu-system-x86_64", &refs)
 }
