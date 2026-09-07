@@ -1,25 +1,80 @@
-# Input de teclado — v0.0.5
+# Keyboard Input — v0.0.5
 
-## Escopo
+## Scope
 
-A v0.0.5 adiciona entrada mínima de teclado PS/2, suficiente para QEMU. O PIC entrega IRQ1 ao handler de teclado; o acesso à porta fica em `arch` e a decodificação de scancodes fica no HAL. O PIT permanece configurado, mas sua IRQ fica mascarada até a etapa de tarefas.
+`v0.0.5` introduced minimal PS/2 keyboard input sufficient for the current QEMU reference environment.
 
-## Fluxo
+The PIC routes IRQ1 to the keyboard interrupt handler. Architecture-specific port access remains in `arch`, while scancode decoding is exposed through the HAL.
+
+The PIT is configured as part of the interrupt foundation, but IRQ0 remains masked in the current `v0.0.6` runtime until scheduling work begins.
+
+## Current flow
 
 ```text
-Teclado PS/2 → IRQ1 → arch::keyboard::handle_interrupt()
-             → scancode atômico → hal::keyboard::take_key()
-             → Key → kernel registra na serial
+PS/2 keyboard
+    |
+    v
+IRQ1
+    |
+    v
+arch::keyboard::handle_interrupt()
+    |
+    v
+atomic scancode storage
+    |
+    v
+hal::keyboard::take_key()
+    |
+    v
+Key
+    |
+    v
+kernel serial diagnostic
 ```
 
-O buffer atual guarda somente o último scancode. Isso não é ainda uma fila de eventos; uma fila será criada quando tarefas e consumidores concorrentes existirem.
+The current storage model retains only the most recent scancode. It is not yet an event queue and does not provide backpressure or multi-consumer semantics.
 
-## Teclas suportadas
+## Supported keys
 
-Scancodes Set 1 para `A`, `B`, `C`, `D`, `E`, `Enter`, `Space` e `Backspace`. Scancodes de liberação e teclas não mapeadas são ignorados.
+The current Set 1 decoder recognizes:
 
-## Segurança e limites
+- `A`
+- `B`
+- `C`
+- `D`
+- `E`
+- `Enter`
+- `Space`
+- `Backspace`
 
-O handler não faz alocação nem formatação: lê a porta `0x60`, grava um byte atômico e envia EOI ao PIC. A conversão para `Key` ocorre fora do contexto da interrupção.
+Release scancodes and unsupported keys are ignored.
 
-Ainda não há suporte a USB, layouts internacionais, Shift/Ctrl/Alt, repetição, fila, mouse ou input de userspace.
+## Interrupt-handler constraints
+
+The IRQ1 handler intentionally remains small. It should not perform allocation, formatting, complex decoding, or high-level policy work.
+
+Its current responsibilities are limited to the hardware-facing path, including reading port `0x60`, recording the scancode, and completing interrupt-controller handling as required.
+
+Higher-level conversion into `Key` occurs outside the interrupt context.
+
+## Current limitations
+
+As of `v0.0.6`, there is no support for:
+
+- a queued input event model;
+- USB keyboards;
+- mouse input;
+- international keyboard layouts;
+- Shift/Ctrl/Alt modifier state;
+- key repeat;
+- full Set 1 coverage;
+- userspace input delivery;
+- device hotplug.
+
+These should be added when the scheduler, userspace, and device model provide concrete consumers for them.
+
+## Verification
+
+Host tests verify a supported key press and that a release scancode is ignored. QEMU validation verifies the IRQ1 path and serial-visible decoded input behavior.
+
+See [`progress.md`](progress.md) for the recorded version evidence.
