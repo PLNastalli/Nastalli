@@ -6,10 +6,13 @@ Este arquivo registra o que foi implementado, por que foi implementado e quais e
 
 - O workspace foi atualizado para `resolver = "3"`, acompanhando a Edition 2024.
 - `kernel::start()` agora coordena apenas a sequência de alto nível e delega banner, plataforma, memória, tarefas, framebuffer e loop para funções pequenas.
+- A `TaskTable` deixa de ser temporária: `initialize_tasks()` devolve a tabela e transfere sua posse para o runtime longo do kernel, preparando o estado persistente que o scheduler consumirá.
+- Foi adicionado um teste de regressão para confirmar que o bootstrap produz exatamente uma tarefa.
 - O framebuffer continua direto no fluxo de boot porque ainda não há um segundo consumidor que justifique `framebuffer → console`.
 - O HAL permanece limitado às abstrações com uso concreto: serial e teclado.
+- O toolchain passou a declarar `rust-src` e `llvm-tools-preview`; o CI também instala esses componentes porque `bootloader 0.11.10` precisa das ferramentas LLVM durante seu build.
 
-Essa mudança não cria uma nova versão funcional; prepara a base para o scheduler sem antecipar abstrações.
+Essa manutenção não cria uma nova versão funcional; corrige a vida útil do estado de tarefas e alinha o ambiente local ao CI antes da implementação do scheduler.
 
 ## v0.0.6 — Estrutura de tarefas
 
@@ -23,7 +26,8 @@ Criar um contrato mínimo para identidade e estado de tarefas sem iniciar ainda 
 - Tabela fixa de 16 tarefas, sem alocação dinâmica.
 - IDs monotônicos e operações explícitas de criação, consulta e mudança de estado.
 - Tarefa bootstrap criada durante a inicialização e marcada como `Running` apenas de forma descritiva.
-- Testes para criação, transição de estado, capacidade e tarefas ausentes.
+- A tabela criada no boot permanece viva no runtime do kernel por ownership explícito, sem singleton/global.
+- Testes para criação, transição de estado, capacidade, tarefas ausentes e construção da tabela bootstrap.
 - Documentação dedicada em `docs/tasks.md`.
 
 ### Limites
@@ -33,13 +37,14 @@ Criar um contrato mínimo para identidade e estado de tarefas sem iniciar ainda 
 
 ### Verificação
 
-- `cargo fmt --all -- --check`: aprovado.
-- `cargo xtask test`: 1 teste de `arch`, 2 de `hal` e 6 do `kernel` passaram.
-- `cargo check` dos crates aplicáveis: aprovado.
-- `cargo clippy ... -- -D warnings`: aprovado.
-- `cargo xtask build`: kernel x86_64 compilado.
+- `cargo fmt --all -- --check`: aprovado localmente antes da manutenção.
+- `cargo xtask test`: testes do modelo de tarefas e demais crates aprovados localmente antes da manutenção.
+- `cargo check` dos crates aplicáveis: aprovado localmente antes da manutenção.
+- `cargo clippy ... -- -D warnings`: aprovado localmente antes da manutenção.
+- `cargo xtask build`: kernel x86_64 compilado localmente.
 - `cargo xtask run` com QEMU + OVMF: boot aprovado.
 - Saída observada: `NASTALLI OS v0.0.6`, `Physical memory: 30269 usable frames.` e `Task table initialized: 1 task.`
+- O primeiro CI público falhava antes dos testes por ausência de `llvm-tools-preview`; a causa foi confirmada nos logs como `failed to get llvm tools: NotFound` e o workflow foi corrigido.
 - O QEMU foi encerrado por timeout controlado após a validação, pois o kernel permanece em loop infinito.
 
 ## v0.0.5 — Teclado PS/2
