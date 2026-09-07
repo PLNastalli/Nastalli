@@ -114,7 +114,9 @@ fn prepare_scheduler_runtime(
     allocator: &mut memory::FrameAllocator<'_>,
 ) -> *mut scheduler::Scheduler {
     let scheduler_frame = allocator.allocate_frame().expect("scheduler runtime frame");
-    let worker_frame = allocator.allocate_frame().expect("preemptive worker stack frame");
+    let worker_frame = allocator
+        .allocate_frame()
+        .expect("preemptive worker stack frame");
 
     unsafe {
         nastalli_arch::paging::zero_frame(physical_memory_offset, scheduler_frame.start_address);
@@ -188,7 +190,8 @@ fn run_preemption_probe(serial: &mut impl Write, scheduler_ptr: *mut scheduler::
 
     while PREEMPTION_SWITCHES.load(Ordering::Acquire) < 4 {
         BOOTSTRAP_HEARTBEATS.fetch_add(1, Ordering::Relaxed);
-        if nastalli_arch::interrupts::ticks().saturating_sub(start_ticks) > PREEMPTION_TIMEOUT_TICKS {
+        if nastalli_arch::interrupts::ticks().saturating_sub(start_ticks) > PREEMPTION_TIMEOUT_TICKS
+        {
             nastalli_arch::interrupts::clear_timer_preemption_hook();
             PREEMPTION_SCHEDULER.store(core::ptr::null_mut(), Ordering::Release);
             panic!("IRQ-driven preemption proof timed out");
@@ -202,7 +205,10 @@ fn run_preemption_probe(serial: &mut impl Write, scheduler_ptr: *mut scheduler::
     assert!(WORKER_HEARTBEATS.load(Ordering::Acquire) > 0);
     assert!(BOOTSTRAP_HEARTBEATS.load(Ordering::Acquire) > 0);
     let _ = writeln!(serial, "Preemption: worker executed without yielding.");
-    let _ = writeln!(serial, "Preemption: four IRQ-driven task switches observed.");
+    let _ = writeln!(
+        serial,
+        "Preemption: four IRQ-driven task switches observed."
+    );
     let _ = writeln!(serial, "Preemption: bootstrap resumed twice.");
 }
 
