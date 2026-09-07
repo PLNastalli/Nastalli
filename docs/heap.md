@@ -1,31 +1,51 @@
-# Heap do kernel — v0.0.4
+# Kernel Heap — v0.0.4
 
-## Escopo
+## Scope
 
-A v0.0.4 adiciona uma heap inicial de 64 KiB para permitir as primeiras alocações do kernel. A área é uma região estática alinhada a 8 bytes e já pertence à imagem do kernel; por isso esta etapa não precisa alterar paginação.
+`v0.0.4` introduced Nastalli's first kernel heap: a static 64 KiB region used to enable initial dynamic allocations in kernel code.
 
-## Contrato
+The region is aligned to 8 bytes and is part of the kernel image, so this milestone did not require Nastalli to take control of page tables or implement dynamic virtual-memory growth.
 
-`kernel::heap::init()` deve ser chamado uma única vez durante a inicialização do kernel, depois de a memória fornecida pelo bootloader estar disponível. O allocator global é um `LockedHeap`, permitindo uso futuro por código que importe `alloc`.
+## Current contract
+
+`kernel::heap::init()` is called once during kernel initialization.
 
 ```rust
 heap::init();
 ```
 
-## Segurança
+The global allocator is based on `linked_list_allocator::LockedHeap`, allowing code that uses `alloc` to allocate from the initial kernel heap after initialization.
 
-A única operação unsafe é a entrega do endereço da área estática ao allocator. O intervalo e o tamanho são constantes do kernel (`SIZE = 64 KiB`), e a inicialização não aceita ponteiros arbitrários externos.
+## Safety boundary
 
-## Limitações
+The unsafe operation in this path provides the allocator with the address and size of the kernel-owned static region.
 
-- A heap não cresce.
-- Não há heap por processo.
-- Não há mapeamento de páginas sob demanda.
-- A capacidade é pequena e não deve ser usada como solução definitiva.
-- A política de desalocação pertence à crate `linked_list_allocator` nesta primeira versão.
+The validity argument is intentionally narrow:
 
-Quando o kernel tiver paginação própria, a heap deverá ser migrada para páginas obtidas pelo `FrameAllocator`, com limites e accounting explícitos.
+- the storage is statically allocated by the kernel;
+- its size is fixed by the kernel (`64 KiB`);
+- the initialization path does not accept an arbitrary external pointer;
+- initialization is expected to occur once during boot.
 
-## Verificação
+Future changes must preserve or explicitly revise these invariants.
 
-Os testes cobrem o alinhamento de endereços. O boot no QEMU confirma a inicialização da heap sem alterar o fluxo de memória física.
+## Current limitations
+
+- the heap does not grow;
+- there is no per-process heap;
+- there is no demand paging;
+- the kernel does not yet obtain heap growth pages from its physical frame allocator;
+- 64 KiB is a bring-up capacity, not a production design;
+- free-list behavior is delegated to `linked_list_allocator` in the current implementation.
+
+## Long-term direction
+
+Once Nastalli controls virtual memory and page mappings, kernel heap growth should be backed by explicitly owned frames and mapped virtual pages, with clear accounting, exhaustion behavior, and synchronization rules.
+
+That future design should not be implemented merely to replace the static heap before there is a real consumer that needs additional capacity.
+
+## Verification
+
+Host tests cover the relevant alignment rule. QEMU boot validation confirms that heap initialization integrates with the rest of kernel startup without breaking the existing physical-memory path.
+
+See [`progress.md`](progress.md) for version-specific validation evidence.
