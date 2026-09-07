@@ -154,7 +154,8 @@ impl Default for TaskTable {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_TASKS, TaskState, TaskTable, TaskTableError};
+    use super::{KernelStack, MAX_TASKS, TaskState, TaskTable, TaskTableError};
+    use nastalli_arch::context::Context;
 
     #[test]
     fn creates_ready_tasks_with_monotonic_ids() {
@@ -201,5 +202,24 @@ mod tests {
 
         assert_eq!(table.create(), Err(TaskTableError::Capacity));
         assert_eq!(table.get(super::TaskId(999)), Err(TaskTableError::NotFound));
+    }
+
+    #[test]
+    fn task_owns_execution_context_and_kernel_stack() {
+        let mut table = TaskTable::new();
+        let id = table.create().unwrap();
+
+        assert_eq!(table.get(id).unwrap().context(), Context::empty());
+        assert_eq!(table.get(id).unwrap().kernel_stack(), None);
+
+        let context = Context {
+            stack_pointer: 0x1234,
+        };
+        let stack = KernelStack::new(0x8000, 4096);
+        table.install_execution(id, context, stack).unwrap();
+
+        let task = table.get(id).unwrap();
+        assert_eq!(task.context(), context);
+        assert_eq!(task.kernel_stack(), Some(stack));
     }
 }
