@@ -2,11 +2,70 @@
 
 This file records what was implemented, why it was implemented, and what evidence exists for each milestone. Planned behavior belongs in [`roadmap.md`](roadmap.md); this document is evidence-oriented and should describe only work that actually happened.
 
+## v0.0.7 — Initial scheduler policy
+
+### Goal
+
+Connect the existing task-state model to real timer ticks and validate a minimal round-robin scheduling policy without claiming full CPU context switching or userspace execution.
+
+### Implemented
+
+- `crates/kernel/src/scheduler.rs` with an initial round-robin policy and a default 5-tick quantum;
+- scheduler tests covering rotation of ready tasks when a quantum expires;
+- runtime ownership of the persistent `TaskTable` by the scheduler;
+- PIT IRQ0 unmasked alongside keyboard IRQ1;
+- a real 100 Hz PIT tick counter consumed by the kernel runtime;
+- serial validation that the first hardware timer tick reaches the scheduler path;
+- QEMU/OVMF smoke validation in CI;
+- modern 4 MiB OVMF launch support through pflash with a writable VARS copy under `target/`.
+
+### GDT/IRQ0 defect found during validation
+
+The first runtime smoke test with IRQ0 enabled exposed a General Protection Fault immediately after interrupts were enabled. Instrumentation narrowed the failure to the first timer interrupt and reported:
+
+```text
+FAULT: GP error=0x0000000000000010
+```
+
+The loaded kernel GDT used selector `0x10` for the TSS while segment registers inherited from the bootloader could still reference `0x10` as a data selector. The fix added an explicit kernel data descriptor and reloads `SS`, `DS`, and `ES` after installing the kernel GDT, before loading the TSS. After that correction, IRQ0 could be delivered and return normally.
+
+During isolation, the timer handler was temporarily reduced to EOI-only. After the GDT defect was fixed, `TICKS.fetch_add(1, Ordering::Relaxed)` was restored before the PIC EOI.
+
+### Verification
+
+The final CI run for the functional fix passed:
+
+- `cargo fmt --all -- --check`;
+- `cargo xtask test`;
+- applicable `cargo check`;
+- Clippy with `-D warnings`;
+- `cargo xtask build` for the x86_64 kernel target;
+- QEMU + OVMF smoke validation.
+
+Observed runtime output included:
+
+```text
+NASTALLI OS v0.0.7
+Interrupt init: enable complete.
+Scheduler initialized: round-robin, 5 tick quantum.
+Scheduler timer active: first PIT tick observed.
+```
+
+### Limits
+
+- scheduler policy and task-state rotation exist, but full CPU context switching is not implemented yet;
+- tasks do not yet own independent execution stacks;
+- multiple task bodies are not yet preemptively executed;
+- there are no processes or Ring 3 userspace yet;
+- ABI and syscall entry are still future milestones.
+
+---
+
 ## Maintenance after v0.0.6
 
 ### Runtime and CI foundation
 
-After `v0.0.6`, several maintenance changes were made without creating a new functional kernel release:
+After `v0.0.6`, several maintenance changes prepared the codebase for the scheduler milestone:
 
 - the Cargo workspace was updated to `resolver = "3"` for Edition 2024;
 - `kernel::start()` was reduced to high-level orchestration and delegates banner, platform, memory, task, framebuffer, and runtime-loop work to smaller initialization functions;
@@ -27,18 +86,16 @@ After `llvm-tools-preview` was added to the toolchain/CI environment, the correc
 
 ### Documentation and project presentation
 
-The public repository documentation was later professionalized without changing the functional kernel version:
+The public repository documentation was professionalized while preserving the distinction between implemented and planned behavior:
 
 - public documentation was converted to English-first;
 - the README was rewritten around current capabilities, explicit experimental status, build/run instructions, architecture, and engineering principles;
-- architecture documentation now separates the current `v0.0.6` implementation from long-term target layers;
+- architecture documentation separates the current implementation from long-term target layers;
 - the roadmap was expanded from short bring-up milestones into an evidence-based maturity path through `v1.0.0` and beyond;
 - `v1.0.0` was defined as a production-grade baseline for explicitly supported configurations rather than a claim of universal Windows/Linux-level hardware compatibility;
 - future hardware support is described through explicit Tier 1/Tier 2/Tier 3/unsupported categories;
 - contribution, security, subsystem, and unsafe-code documentation was rewritten in professional English while preserving current implementation facts;
 - a design record and implementation plan were added under `docs/superpowers/` for the documentation overhaul.
-
-This documentation work does not mark future roadmap features as implemented and does not advance the kernel beyond `v0.0.6`.
 
 ---
 
@@ -61,8 +118,8 @@ Create a minimal contract for task identity and task state without introducing a
 
 ### Limits
 
-- PIT infrastructure exists, but IRQ0 remains masked in the current runtime;
-- there is no scheduler;
+- PIT infrastructure exists, but IRQ0 remains masked in the `v0.0.6` runtime;
+- there is no scheduler in `v0.0.6`;
 - there is no preemption;
 - there is no saved CPU context model;
 - tasks do not yet own independent stacks;
