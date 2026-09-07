@@ -1,0 +1,15 @@
+/target/
+*.img
+*.qcow2
+*.raw
+
+# Local/editor files
+.DS_Store
+*.swp
+*.swo
+
+# Local secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+

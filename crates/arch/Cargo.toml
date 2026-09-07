@@ -1,0 +1,10 @@
+[package]
+name = "novaos-arch"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+x86_64 = "=0.14.13"
+lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
+pic8259 = "0.10.1"
+spin = "0.9.8"

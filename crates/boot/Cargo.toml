@@ -1,0 +1,8 @@
+[package]
+name = "novaos-boot"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bootloader_api.workspace = true
+novaos-kernel = { path = "../kernel" }
