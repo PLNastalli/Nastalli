@@ -16,7 +16,7 @@ Sistema operacional próprio, escrito principalmente em Rust, começando por x86
 **Status:** boot validado em QEMU + OVMF
 **Próxima versão:** `v0.0.7`, scheduler inicial
 
-A versão atual entra no kernel Rust `no_std`, inicializa GDT/TSS, IDT, PIC 8259 e PIT a 100 Hz, captura teclado PS/2 pela IRQ1, conta frames físicos utilizáveis a partir do `BootInfo`, inicializa uma heap estática de 64 KiB, cria a tabela inicial de tarefas, acessa o framebuffer e escreve diagnóstico pela serial COM1.
+A versão atual entra no kernel Rust `no_std`, inicializa GDT/TSS, IDT, PIC 8259 e PIT a 100 Hz, captura teclado PS/2 pela IRQ1, conta frames físicos utilizáveis a partir do `BootInfo`, inicializa uma heap estática de 64 KiB, cria a tabela inicial de tarefas e mantém sua posse no runtime do kernel, acessa o framebuffer e escreve diagnóstico pela serial COM1.
 
 ## Arquitetura
 
@@ -49,10 +49,10 @@ Para ambientes headless, use `NASTALLI_QEMU_DISPLAY=none cargo xtask run`.
 
 ## Desenvolvimento
 
-Requisitos: Rust nightly definido em [`rust-toolchain.toml`](rust-toolchain.toml), target `x86_64-unknown-none`, QEMU e OVMF.
+Requisitos: Rust nightly definido em [`rust-toolchain.toml`](rust-toolchain.toml), target `x86_64-unknown-none`, componentes `rust-src` e `llvm-tools-preview`, QEMU e OVMF.
 
 ```bash
-rustup component add rust-src --toolchain nightly-2025-01-01
+rustup component add rust-src llvm-tools-preview --toolchain nightly-2025-01-01
 cargo fmt --all -- --check
 cargo xtask test
 cargo xtask build
