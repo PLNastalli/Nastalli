@@ -114,6 +114,36 @@ impl TaskTable {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    pub(crate) fn running_task(&self) -> Option<TaskId> {
+        self.entries
+            .iter()
+            .flatten()
+            .find(|task| task.state == TaskState::Running)
+            .map(|task| task.id)
+    }
+
+    pub(crate) fn next_ready_after(&self, current: Option<TaskId>) -> Option<TaskId> {
+        let start = current
+            .and_then(|id| {
+                self.entries
+                    .iter()
+                    .position(|entry| entry.is_some_and(|task| task.id == id))
+            })
+            .map(|index| (index + 1) % MAX_TASKS)
+            .unwrap_or(0);
+
+        for offset in 0..MAX_TASKS {
+            let index = (start + offset) % MAX_TASKS;
+            if let Some(task) = self.entries[index]
+                && task.state == TaskState::Ready
+            {
+                return Some(task.id);
+            }
+        }
+
+        None
+    }
 }
 
 impl Default for TaskTable {
