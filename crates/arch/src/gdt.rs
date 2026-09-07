@@ -3,7 +3,7 @@ use x86_64::VirtAddr;
 use x86_64::structures::gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector};
 use x86_64::structures::tss::TaskStateSegment;
 
-const DOUBLE_FAULT_IST_INDEX: u16 = 0;
+pub(crate) const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 const KERNEL_INTERRUPT_STACK_SIZE: usize = 16 * 1024;
 
 lazy_static! {
