@@ -153,10 +153,10 @@ fn wait_for_prepared_switch(
         let now = nastalli_arch::interrupts::ticks();
         while observed_ticks < now {
             observed_ticks = observed_ticks.saturating_add(1);
-            let decision = unsafe { (&mut *scheduler_ptr).on_tick() };
+            let decision = unsafe { (*scheduler_ptr).on_tick() };
             if matches!(decision, scheduler::ScheduleDecision::Switch { .. }) {
                 return unsafe {
-                    (&mut *scheduler_ptr)
+                    (*scheduler_ptr)
                         .prepare_context_switch(decision)
                         .expect("scheduled tasks own contexts")
                 };
@@ -262,7 +262,7 @@ fn run(
         core::hint::spin_loop();
     }
 
-    let _ = unsafe { (&mut *scheduler_ptr).on_tick() };
+    let _ = unsafe { (*scheduler_ptr).on_tick() };
     let _ = writeln!(serial, "Scheduler timer active: first PIT tick observed.");
 
     run_task_switch_probe(serial, scheduler_ptr);
