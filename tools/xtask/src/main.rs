@@ -46,13 +46,15 @@ fn image() -> io::Result<()> {
 }
 
 fn run_qemu() -> io::Result<()> {
-    let image = workspace_root().join("target/nastalli-uefi.img");
+    let root = workspace_root();
+    let image = root.join("target/nastalli-uefi.img");
     if !program_in_path("qemu-system-x86_64") {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             "qemu-system-x86_64 was not found; install QEMU",
         ));
     }
+
     let ovmf = find_ovmf().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
@@ -60,16 +62,35 @@ fn run_qemu() -> io::Result<()> {
         )
     })?;
     let display = env::var("NASTALLI_QEMU_DISPLAY").unwrap_or_else(|_| "gtk".to_owned());
-    command("qemu-system-x86_64", &[
-        "-bios",
-        &ovmf,
-        "-drive",
-        &format!("format=raw,file={}", image.display()),
-        "-serial",
-        "stdio",
-        "-display",
-        &display,
-    ])
+
+    let mut args = Vec::new();
+    if let Some(vars_template) = ovmf.vars {
+        let vars = root.join("target/nastalli-ovmf-vars.fd");
+        fs::copy(vars_template, &vars)?;
+        args.extend([
+            "-drive".to_owned(),
+            format!(
+                "if=pflash,format=raw,unit=0,readonly=on,file={}",
+                ovmf.code.display()
+            ),
+            "-drive".to_owned(),
+            format!("if=pflash,format=raw,unit=1,file={}", vars.display()),
+        ]);
+    } else {
+        args.extend(["-bios".to_owned(), ovmf.code.display().to_string()]);
+    }
+
+    args.extend([
+        "-drive".to_owned(),
+        format!("format=raw,file={}", image.display()),
+        "-serial".to_owned(),
+        "stdio".to_owned(),
+        "-display".to_owned(),
+        display,
+    ]);
+
+    let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+    command("qemu-system-x86_64", &refs)
 }
 
 fn program_in_path(program: &str) -> bool {
@@ -80,22 +101,51 @@ fn program_in_path(program: &str) -> bool {
         .any(|path| path.is_file())
 }
 
-fn find_ovmf() -> Option<String> {
-    if let Ok(path) = env::var("NASTALLI_OVMF_CODE") {
-        return Some(path);
+struct OvmfFirmware {
+    code: PathBuf,
+    vars: Option<PathBuf>,
+}
+
+fn find_ovmf() -> Option<OvmfFirmware> {
+    if let Ok(code) = env::var("NASTALLI_OVMF_CODE") {
+        let code = PathBuf::from(code);
+        let vars = env::var_os("NASTALLI_OVMF_VARS").map(PathBuf::from);
+        return code.is_file().then_some(OvmfFirmware { code, vars });
     }
 
     [
-        "/usr/share/edk2/x64/OVMF.4m.fd",
-        "/usr/share/edk2/x64/OVMF_CODE.fd",
-        "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
-        "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd",
-        "/usr/share/OVMF/OVMF_CODE.fd",
-        "/usr/share/OVMF/OVMF_CODE_4M.fd",
+        (
+            "/usr/share/edk2/x64/OVMF_CODE.fd",
+            Some("/usr/share/edk2/x64/OVMF_VARS.fd"),
+        ),
+        (
+            "/usr/share/edk2/x64/OVMF_CODE.4m.fd",
+            Some("/usr/share/edk2/x64/OVMF_VARS.4m.fd"),
+        ),
+        (
+            "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd",
+            Some("/usr/share/edk2-ovmf/x64/OVMF_VARS.fd"),
+        ),
+        (
+            "/usr/share/OVMF/OVMF_CODE.fd",
+            Some("/usr/share/OVMF/OVMF_VARS.fd"),
+        ),
+        (
+            "/usr/share/OVMF/OVMF_CODE_4M.fd",
+            Some("/usr/share/OVMF/OVMF_VARS_4M.fd"),
+        ),
+        ("/usr/share/edk2/x64/OVMF.4m.fd", None),
     ]
     .into_iter()
-    .find(|path| std::path::Path::new(path).exists())
-    .map(String::from)
+    .find_map(|(code, vars)| {
+        let code = PathBuf::from(code);
+        if !code.is_file() {
+            return None;
+        }
+
+        let vars = vars.map(PathBuf::from).filter(|path| path.is_file());
+        Some(OvmfFirmware { code, vars })
+    })
 }
 
 fn workspace_root() -> PathBuf {
