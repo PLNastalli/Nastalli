@@ -9,12 +9,14 @@
 
 ## Project status
 
-- **Current version:** `v0.0.6`
+- **Current version:** `v0.0.7`
 - **Reference platform:** x86_64 + UEFI + QEMU/OVMF
-- **Next milestone:** `v0.0.7` — initial scheduler
+- **Next milestone:** `v0.0.8` — controlled Ring 3 transition foundation
 - **Maturity:** early kernel bring-up
 
-The current kernel boots through UEFI, enters Rust `no_std`, initializes GDT/TSS, IDT, PIC 8259 and PIT infrastructure, handles basic PS/2 keyboard input through IRQ1, reads the bootloader memory map, exposes a 4 KiB physical-frame allocator model, initializes a static 64 KiB kernel heap, creates a persistent initial task table, accesses the framebuffer, and writes diagnostics through COM1 serial output.
+The current kernel boots through UEFI, enters Rust `no_std`, initializes GDT/TSS, IDT, PIC 8259 and a 100 Hz PIT timer, handles basic PS/2 keyboard input through IRQ1, reads the bootloader memory map, exposes a 4 KiB physical-frame allocator model, initializes a static 64 KiB kernel heap, owns a persistent task table, applies an initial round-robin scheduler policy with a 5-tick quantum, accesses the framebuffer, and writes diagnostics through COM1 serial output.
+
+The current scheduler milestone validates timer-driven scheduling policy and task-state rotation. It does **not** yet provide full CPU context switching, independent task stacks, preemptive execution of multiple task bodies, processes, or userspace.
 
 Nastalli is **not** a Linux distribution and does not reuse the Linux kernel.
 
@@ -58,7 +60,7 @@ The roadmap is organized by engineering maturity rather than fixed dates:
 
 | Milestone | Focus |
 |---|---|
-| `v0.0.x` | Kernel bring-up: boot, interrupts, memory, heap, input, task model |
+| `v0.0.x` | Kernel bring-up: boot, interrupts, memory, heap, input, task model, initial scheduler policy |
 | `v0.1.0` | Scheduler, context switching, Ring 3, syscalls, first userspace |
 | `v0.2.0` | Processes, threads, virtual memory, ELF loading |
 | `v0.3.0` | VFS, persistent storage, block I/O |
@@ -94,9 +96,10 @@ Useful environment variables:
 ```bash
 NASTALLI_QEMU_DISPLAY=none cargo xtask run
 NASTALLI_OVMF_CODE=/path/to/OVMF_CODE.fd cargo xtask run
+NASTALLI_OVMF_VARS=/path/to/OVMF_VARS.fd cargo xtask run
 ```
 
-`cargo xtask build` targets `x86_64-unknown-none`. `cargo xtask image` creates the UEFI disk image, and `cargo xtask run` starts QEMU using OVMF.
+`cargo xtask build` targets `x86_64-unknown-none`. `cargo xtask image` creates the UEFI disk image, and `cargo xtask run` starts QEMU using OVMF. For pflash-based OVMF, the writable VARS template is copied into `target/` before QEMU starts so the system firmware template is not modified in place.
 
 ## Documentation
 
