@@ -1,8 +1,8 @@
 # Architecture
 
-## Current state: v0.0.9 with v0.1.0 context-switch development
+## Current state
 
-Nastalli is intentionally small at its current stage. The workspace is split into focused crates with explicit dependency direction and an experimental userspace contract:
+Nastalli is an experimental Rust operating-system kernel. The current public runtime is `v0.0.9`; `v0.1.0` is under active development and is integrating task execution, scheduling, preemption, and the first persistent userspace.
 
 ```text
 userspace probe
@@ -12,160 +12,195 @@ userspace probe
       |
       v
 crates/kernel
-      |
-      +------> crates/hal
-      |           |
-      |           v
-      +------> crates/arch
+  |       |
+  |       +--> crates/hal
+  |               |
+  +------------> crates/arch
                   |
                   v
        hardware / privileged CPU state
 
-crates/boot  -> kernel entry and BootInfo handoff
-tools/xtask  -> host-side build, image, test, and run automation
+crates/boot  -> bootloader entry and BootInfo handoff
+tools/xtask  -> host build, image, test and QEMU automation
 ```
 
-`crates/abi` is not a hardware layer. It contains architecture-independent constants and contracts shared across the kernel/userspace boundary. The current ABI is experimental and intentionally tiny.
+The dependency direction is deliberate: policy lives above mechanisms. `kernel` decides *what* should run; `arch` implements *how* privileged x86_64 state is changed.
+
+## Crate responsibilities
 
 ### `crates/boot`
 
-Owns bootloader integration and the kernel entry point. It receives `BootInfo` from `bootloader_api`, forwards control to the kernel, and contains binary-level boot/panic integration. It should not become a general hardware or policy layer.
+Owns bootloader integration and transfers `BootInfo` to the kernel. It is intentionally thin and should not become a policy or general hardware layer.
 
 ### `crates/abi`
 
-Owns the minimal contract that must be shared between userspace and the kernel without importing architecture internals. The current crate is `no_std` and defines the experimental syscall vector used by the first Ring 3 probe.
+Owns architecture-independent contracts shared across the userspace/kernel boundary. It is `no_std` and currently exposes the experimental software-interrupt syscall vector used by the Ring 3 validation path.
 
-It does not yet define a stable syscall-number namespace, argument ABI, error model, handle model, or compatibility guarantee.
+The ABI is not stable. A syscall-number namespace, argument/error model, handle model, compatibility policy, and general dispatcher are still future work.
 
 ### `crates/arch`
 
-Owns architecture-specific and privileged x86_64 operations. Current responsibilities include:
+Owns architecture-specific and privileged x86_64 mechanisms:
 
 - port I/O;
-- GDT/TSS and privilege-stack setup;
-- IDT/PIC/PIT integration;
-- paging operations used by the current probes;
-- Ring 0 -> Ring 3 transition;
-- the Ring 3-callable syscall interrupt gate;
-- low-level kernel context preparation and context switching.
+- GDT/TSS and privilege stacks;
+- IDT, legacy PIC and PIT integration;
+- paging helpers required by current mappings;
+- controlled Ring 0 -> Ring 3 transition;
+- Ring 3-callable syscall/breakpoint gates;
+- kernel context construction and context switching.
 
-The context-switch mechanism saves/restores `rsp` and the x86_64 SysV callee-saved register set (`rbp`, `rbx`, `r12`-`r15`). Fresh kernel contexts are entered through an architecture trampoline prepared on their own stack.
-
-`arch` contains the narrow unavoidable `unsafe` and assembly boundaries. Scheduler policy remains outside this crate.
+The cooperative context-switch primitive preserves `rsp` plus the SysV callee-saved register set (`rbp`, `rbx`, `r12`-`r15`). It deliberately contains assembly and raw stack manipulation that do not belong in scheduler policy.
 
 ### `crates/hal`
 
-Exposes safe hardware-facing interfaces to higher layers. The current HAL remains intentionally small and contains abstractions with real consumers, such as serial and keyboard input.
-
-The HAL must not become an abstract framework for hardware that Nastalli does not yet support.
+Provides safe hardware-facing interfaces with real current consumers. The HAL is deliberately small; Nastalli does not add abstractions merely because a future OS might need them.
 
 ### `crates/kernel`
 
-Owns kernel policy and architecture-independent core state where practical. Current responsibilities include:
+Owns architecture-independent policy and long-lived runtime state where practical:
 
-- physical-memory inspection/allocation model;
-- static kernel heap;
-- task identity/state model;
-- round-robin scheduler policy driven by PIT tick accounting;
+- physical-frame allocation model;
+- kernel heap;
+- task identity/state/context ownership;
+- kernel-stack metadata;
+- round-robin scheduler policy;
+- conversion of scheduler switch decisions into task-owned context switches;
 - startup/runtime orchestration;
-- controlled validation of the architecture context-switch mechanism;
-- preparation of the current Ring 3 probe.
+- preparation of the experimental Ring 3 path.
 
-The kernel does not directly perform port I/O and does not duplicate register-switch assembly. It calls the narrow mechanisms exposed by `arch`.
-
-The current cooperative context-switch probe is deliberately separate from the `Task`/`Scheduler` lifecycle. It proves that the CPU can leave the bootstrap stack, execute on an independent physical-frame-backed kernel stack, return, resume that worker, and return again. It does **not** yet mean scheduler decisions switch real task contexts.
+`Task` now owns a saved `Context` and optional `KernelStack` metadata. `Scheduler` owns the task table. The scheduler changes runnable state and selects `from/to`; the runtime performs the low-level switch through `arch`.
 
 ### `tools/xtask`
 
-Runs on the development host with `std` and centralizes build, image creation, tests, QEMU execution, and related tooling. It is not part of the target kernel runtime.
+Runs on the development host with `std`. It centralizes build, image creation, host tests, QEMU/OVMF execution, and diagnostics. It is not part of the target kernel.
 
-## Current initialization and validation flow
+## Current boot and execution path
 
-At a high level, the current reference QEMU path is:
+The reference QEMU path is currently:
 
 ```text
-UEFI firmware / OVMF
-        |
-        v
+UEFI / OVMF
+    |
 bootloader 0.11.10
-        |
-        v
-crates/boot entry point
-        |
-        v
+    |
+crates/boot
+    |
 nastalli_kernel::start(BootInfo)
-        |
-        +--> serial diagnostics
-        +--> GDT/TSS, including Ring 0 privilege stack
-        +--> IDT + PIC + 100 Hz PIT
-        +--> static kernel heap
-        +--> physical-memory inspection
-        +--> persistent bootstrap TaskTable
-        +--> round-robin scheduler policy
-        +--> first real PIT tick observed
-        |
-        +--> cooperative context-switch probe
-        |       |
-        |       +--> bootstrap -> worker stack
-        |       +--> worker -> bootstrap
-        |       +--> bootstrap -> resumed worker
-        |       +--> worker -> bootstrap
-        |
-        +--> allocate/map Ring 3 code and stack
-        +--> iretq to Ring 3
-                |
-                +--> int 0x80 -> Ring 0 syscall gate
-                |                 |
-                |                 +--> iretq back to Ring 3
-                |
-                +--> int3 -> Ring 0 breakpoint handler
+    |
+    +--> serial
+    +--> GDT/TSS
+    +--> IDT + PIC + PIT 100 Hz
+    +--> heap
+    +--> physical-memory allocator
+    +--> bootstrap Task
+    +--> worker Task + independent kernel stack
+    +--> Scheduler (5-tick round robin)
+    |
+    +--> PIT ticks recorded by IRQ0
+    |
+    +--> normal kernel code consumes ticks
+    |       |
+    |       +--> scheduler selects worker
+    |       +--> bootstrap -> worker
+    |       +--> scheduler selects bootstrap
+    |       +--> worker -> bootstrap
+    |       +--> repeat one more round trip
+    |
+    +--> map Ring 3 code/stack
+    +--> iretq to Ring 3
+            |
+            +--> int 0x80 -> kernel -> iretq to Ring 3
+            +--> int3 -> kernel breakpoint handler
 ```
 
-A single monotonic `FrameAllocator` instance is used by the runtime validation path for the worker stack and later Ring 3/page-table allocations. This avoids accidentally handing the same usable physical frame to multiple consumers.
+One monotonic `FrameAllocator` instance supplies the scheduler state frame, worker stack, Ring 3 pages, and required page-table frames. This prevents duplicated allocator cursors from returning the same physical frames to different early consumers.
 
-The QEMU smoke test requires the context-switch, syscall-return, and final breakpoint markers. The runtime validation therefore checks both the new kernel-stack transition and the older privilege-transition path in one boot.
+## Task and scheduler ownership
 
-## Current execution model
+Long-lived runtime state must have a stable owner:
 
-Three pieces exist today but are not fully integrated:
+```text
+Scheduler
+   |
+   +--> TaskTable
+          |
+          +--> Task 0 (bootstrap)
+          |      +--> saved Context
+          |
+          +--> Task 1 (worker)
+                 +--> saved Context
+                 +--> KernelStack metadata
+```
 
-1. **Task model** — identifies tasks and tracks descriptive states.
-2. **Scheduler policy** — rotates runnable task state according to a 5-tick round-robin quantum driven by a real 100 Hz PIT counter.
-3. **Architecture context switching** — can save/restore a kernel execution context and run a fresh context on an independent stack.
+The early scheduler object itself currently resides in a dedicated physical frame so its address remains stable while the active CPU stack changes.
 
-The next scheduler work must connect these pieces so task-owned contexts/stacks are switched by scheduling decisions rather than by a dedicated validation probe.
+This is a bring-up mechanism, not the final general allocator/lifetime design. Stack freeing, task reaping, dynamic virtual mappings, and resource teardown remain incomplete.
 
-## Current userspace/ABI boundary
+## Interrupt/preemption boundary
 
-Nastalli can currently:
+The current execution switches are **driven by real PIT tick accounting but are not IRQ-preemptive**.
 
-- map a user-accessible code page and user stack page;
-- transition from Ring 0 to Ring 3 through `iretq`;
-- accept the experimental software-interrupt syscall vector from Ring 3;
-- return from that kernel entry to Ring 3;
-- take a subsequent Ring 3 breakpoint through the TSS Ring 0 stack.
+IRQ0 currently performs the minimal hardware path: record a tick and acknowledge the PIC. Normal kernel execution later consumes those ticks and invokes scheduler policy.
 
-This is a privilege-transition and syscall-entry foundation, not yet a general process runtime.
+The existing cooperative `arch::context::switch()` must **not** simply be called from the timer handler. Doing so would save the handler's callee-saved state and handler `rsp`, not the complete CPU state of the interrupted task.
 
-## Current non-goals and missing integration
+Real preemption therefore requires a separate architecture contract:
 
-The following are **not yet implemented**:
+```text
+PIT IRQ0
+   |
+   v
+interrupt/trap entry
+   |
+   +--> save complete interrupted task state
+   +--> acknowledge interrupt at the correct point
+   |
+   v
+kernel scheduler policy
+   |
+   v
+select next runnable task
+   |
+   v
+restore selected interrupt context
+   |
+   v
+iretq
+```
 
-- scheduler-driven CPU context switching;
-- PIT-driven preemptive execution-context changes;
-- generic task-owned kernel stack allocation and teardown;
-- saved CPU contexts stored as part of the `Task` lifecycle;
-- repeated execution of multiple scheduler-managed task bodies;
-- process/thread runtime objects;
+The trap-frame format, ownership, privilege transitions, stack selection, and return invariants must be explicit and tested before IRQ-driven context switching is enabled.
+
+## Current userspace boundary
+
+Nastalli currently proves that it can:
+
+- map a user-accessible code page and stack;
+- enter Ring 3 with `iretq`;
+- receive experimental vector `0x80` from Ring 3;
+- return to the same user execution;
+- subsequently enter the kernel through a Ring 3 breakpoint using the TSS privilege stack.
+
+This is not yet a process runtime. The user pages belong to a validation path, not an isolated process/address-space object.
+
+## Current missing subsystems
+
+Not yet implemented:
+
+- IRQ-driven task preemption;
+- complete interrupted-register/trap-frame storage per task;
+- generic task stack allocation/free lifecycle;
+- sleep/wakeup and wait queues;
+- process/thread objects;
 - per-process virtual address spaces;
 - ELF loading;
-- a general syscall dispatcher and stable syscall-number/argument ABI;
-- userspace `init` or shell;
-- process exit/reaping semantics;
-- VFS or persistent filesystems;
+- general syscall dispatch and stable ABI;
+- persistent userspace `init` and shell;
+- process exit/reaping;
+- VFS/persistent filesystem;
 - networking;
-- USB;
-- general graphics or audio stacks;
+- modern PCIe/ACPI driver framework;
+- USB, general graphics or audio;
 - SMP/multicore scheduling;
 - capability enforcement;
 - production security guarantees.
@@ -174,41 +209,33 @@ The following are **not yet implemented**:
 
 ### Safe Rust by default
 
-Safe Rust is the default. `unsafe` is reserved for boundaries where hardware, boot integration, privileged state, ABI contracts, raw stack manipulation, or invariants outside the compiler's model require it. See [`unsafe-policy.md`](unsafe-policy.md).
+Safe Rust is the default. `unsafe` is restricted to hardware, boot, privileged CPU state, ABI boundaries, raw memory/stack manipulation, and invariants that cannot be expressed safely. Every `unsafe` boundary should state its contract.
 
 ### Explicit ownership
 
-Long-lived kernel state should have an explicit owner. Global state is not forbidden, but it should be introduced only when the architecture requires truly global synchronization or access semantics.
+CPU context, stack memory, address spaces, resources, and long-lived scheduler state must have identifiable owners. Copies of descriptive IDs are fine; accidental copies of ownership-bearing execution state are not.
 
-The current context-switch probe intentionally keeps its saved contexts in stable memory rather than relying on a movable/local temporary object while another stack can resume into it. The production task model must make this ownership rule explicit per task.
-
-### Dependency direction
-
-Higher layers should consume narrow interfaces from lower layers rather than reaching through them.
-
-Conceptually:
+### Policy/mechanism separation
 
 ```text
-policy -> abstraction -> mechanism -> hardware
+scheduler policy -> architecture mechanism -> hardware
 ```
 
-Scheduler policy must not absorb x86_64 register/stack assembly. Conversely, `arch` must not decide which task should run next.
+`kernel::scheduler` selects tasks. `arch` never chooses scheduling policy. `kernel` does not duplicate x86_64 assembly.
 
-Architecture-specific types should not leak into generic kernel APIs unless the abstraction would otherwise be artificial or misleading.
+### Evidence before claims
+
+A build proves compilation. A host test proves host-visible logic. Runtime/privilege/scheduler claims require QEMU or hardware evidence. Documentation must name limitations explicitly.
 
 ### No speculative abstraction
 
-Nastalli does not create empty subsystem crates merely because a mature OS will eventually need those subsystems. New modules and boundaries are introduced when real implementation pressure justifies them.
+New crates, traits, driver frameworks, and subsystem layers are introduced only when implementation pressure justifies them.
 
 ### Owner-controlled trust
 
-The long-term design treats the machine owner as the final authority over the device. Security mechanisms should protect resources without creating an unavoidable project-controlled remote authority, mandatory project account, or project master key.
-
-See [`security-model.md`](security-model.md).
+The long-term system treats the device owner as final authority. Security should not require a project-controlled master key, mandatory project account, mandatory telemetry, or unavoidable remote control.
 
 ## Long-term direction
-
-The following diagram describes a **target direction**, not the current implementation:
 
 ```text
 Applications / Services
@@ -219,14 +246,10 @@ Stable Userspace ABI
         v
 +--------------------------------+
 |         Nastalli Kernel        |
-|                                |
-|  Scheduler                     |
-|  Virtual Memory                |
-|  IPC                           |
-|  Capability / Handle Model     |
-|  VFS                           |
-|  Process / Thread Model        |
-|  Device Management             |
+| Scheduler / Processes          |
+| Virtual Memory / IPC           |
+| Capability + Handle Model      |
+| VFS / Device Management        |
 +---------------+----------------+
                 |
                HAL
@@ -236,28 +259,21 @@ Stable Userspace ABI
      x86_64            ARM64
 ```
 
-The precise split between kernel-space and user-space services or drivers is intentionally not frozen yet. The project can evolve toward stronger isolation as IPC, capability management, scheduling, and driver contracts become mature enough to support it without blocking early development.
+The eventual split between kernel and userspace drivers/services is intentionally not frozen. Stronger isolation should be adopted when IPC, capabilities, scheduling, and driver contracts are mature enough to support it cleanly.
 
-## ABI policy
+## ABI and hardware support policy
 
-Nastalli now exposes an **experimental** userspace/kernel contract through `crates/abi`, currently sufficient only for the first syscall-entry proof. It is not stable and may change freely while the kernel/process model is still being developed.
+The current ABI is experimental and may change freely before stabilization. A stable candidate is planned for the `v0.9.x` release-candidate period.
 
-Before `v1.0.0`, the project intends to define and validate a stable userspace ABI candidate during the `v0.9.x` stabilization period. Stability guarantees must be documented explicitly before applications are expected to depend on them long term.
-
-## Hardware support policy
-
-QEMU/OVMF x86_64 is the initial reference platform. Real-hardware support will be introduced gradually and documented through support tiers rather than assumed globally.
-
-The roadmap defines the intended Tier 1, Tier 2, Tier 3, and unsupported categories. A production-grade release will be considered stable only for configurations included in its documented support matrix.
+QEMU/OVMF x86_64 remains the reference platform. Real hardware will be documented using explicit support tiers; `v1.0.0` means production-grade only for configurations in the published support matrix.
 
 ## Architectural change policy
 
-A meaningful architectural change should update, in the same development cycle:
+Meaningful architecture changes must update, in the same development cycle:
 
-- this document;
-- the affected subsystem documentation;
-- `progress.md` with evidence once behavior is verified;
-- `roadmap.md` if milestone scope changes;
+- implementation and tests;
+- this architecture document;
+- the affected subsystem document;
+- `progress.md` once evidence exists;
+- `roadmap.md` when milestone state/scope changes;
 - security documentation if trust boundaries change.
-
-Implementation evidence takes precedence over planned architecture.
