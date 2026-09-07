@@ -13,14 +13,8 @@ mod tests {
     fn prepared_context_starts_inside_aligned_stack() {
         let mut stack = AlignedStack([0; 4096]);
         let bottom = stack.0.as_mut_ptr();
-        let context = unsafe {
-            super::prepare(
-                bottom,
-                stack.0.len(),
-                dummy_entry,
-                core::ptr::null_mut(),
-            )
-        };
+        let context =
+            unsafe { super::prepare(bottom, stack.0.len(), dummy_entry, core::ptr::null_mut()) };
         let start = bottom as u64;
         let end = start + stack.0.len() as u64;
 
