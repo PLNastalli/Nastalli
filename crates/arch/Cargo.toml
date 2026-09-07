@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+nastalli-abi = { path = "../abi" }
 x86_64 = "=0.14.13"
 lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
 pic8259 = "0.10.1"
