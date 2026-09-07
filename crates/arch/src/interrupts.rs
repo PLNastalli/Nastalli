@@ -43,7 +43,11 @@ impl InterruptIndex {
 }
 
 pub fn init() {
+    trace(b"Interrupt init: IDT start.\r\n");
     IDT.load();
+    trace(b"Interrupt init: IDT complete.\r\n");
+
+    trace(b"Interrupt init: PIC start.\r\n");
     unsafe {
         let mut pics = PICS.lock();
         pics.initialize();
@@ -51,8 +55,15 @@ pub fn init() {
         // ticks; scheduler policy remains outside interrupt context.
         pics.write_masks(0b1111_1100, 0xff);
     }
+    trace(b"Interrupt init: PIC complete.\r\n");
+
+    trace(b"Interrupt init: PIT start.\r\n");
     configure_pit(TIMER_FREQUENCY_HZ);
+    trace(b"Interrupt init: PIT complete.\r\n");
+
+    trace(b"Interrupt init: enable start.\r\n");
     x86_64::instructions::interrupts::enable();
+    trace(b"Interrupt init: enable complete.\r\n");
 }
 
 pub fn ticks() -> u64 {
@@ -74,6 +85,12 @@ fn configure_pit(frequency_hz: u32) {
         port_write(0x43, 0x36);
         port_write(0x40, (divisor & 0xff) as u8);
         port_write(0x40, (divisor >> 8) as u8);
+    }
+}
+
+fn trace(message: &[u8]) {
+    for &byte in message {
+        crate::serial::write_byte(byte);
     }
 }
 
