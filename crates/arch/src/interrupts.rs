@@ -51,9 +51,10 @@ pub fn init() {
     unsafe {
         let mut pics = PICS.lock();
         pics.initialize();
-        // Enable timer IRQ0 and keyboard IRQ1. The timer handler only records
-        // ticks; scheduler policy remains outside interrupt context.
-        pics.write_masks(0b1111_1100, 0xff);
+        // Diagnostic control: keep IRQ0 masked and enable only the keyboard.
+        // If STI returns in this configuration, the timer delivery path is the
+        // fault source rather than generic interrupt enabling.
+        pics.write_masks(0b1111_1101, 0xff);
     }
     trace(b"Interrupt init: PIC complete.\r\n");
 
