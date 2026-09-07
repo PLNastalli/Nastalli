@@ -18,8 +18,7 @@ lazy_static! {
         unsafe {
             idt.breakpoint
                 .set_handler_fn(breakpoint_handler)
-                .set_privilege_level(PrivilegeLevel::Ring3)
-                .set_stack_index(crate::gdt::DOUBLE_FAULT_IST_INDEX);
+                .set_privilege_level(PrivilegeLevel::Ring3);
         }
         idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
         idt.double_fault.set_handler_fn(double_fault_handler);
