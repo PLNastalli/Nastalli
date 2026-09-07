@@ -51,6 +51,10 @@ jobs:
           grep -F "Context switch: bootstrap resumed." qemu.log
           grep -F "Context switch: worker resumed." qemu.log
           grep -F "Context switch: bootstrap resumed twice." qemu.log
+          grep -F "Task switch: worker entered." qemu.log
+          grep -F "Task switch: bootstrap resumed." qemu.log
+          grep -F "Task switch: worker resumed." qemu.log
+          grep -F "Task switch: bootstrap resumed twice." qemu.log
           grep -F "Ring 3 syscall entered kernel and returned." qemu.log
           grep -F "Ring 3 probe reached kernel breakpoint." qemu.log
 
