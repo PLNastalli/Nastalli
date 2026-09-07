@@ -13,9 +13,9 @@ pub fn start(boot_info: &'static mut BootInfo) -> ! {
     write_banner(&mut serial);
     initialize_platform(&mut serial);
     initialize_memory(&mut serial, boot_info);
-    initialize_tasks(&mut serial);
+    let tasks = initialize_tasks(&mut serial);
     paint_framebuffer(boot_info);
-    run(&mut serial);
+    run(&mut serial, tasks);
 }
 
 fn write_banner(serial: &mut impl Write) {
@@ -47,13 +47,19 @@ fn initialize_memory(serial: &mut impl Write, boot_info: &mut BootInfo) {
     let _ = writeln!(serial, "Physical memory: {usable_frames} usable frames.");
 }
 
-fn initialize_tasks(serial: &mut impl Write) {
+fn initialize_tasks(serial: &mut impl Write) -> task::TaskTable {
+    let tasks = bootstrap_task_table();
+    let _ = writeln!(serial, "Task table initialized: {} task.", tasks.len());
+    tasks
+}
+
+fn bootstrap_task_table() -> task::TaskTable {
     let mut tasks = task::TaskTable::new();
     let bootstrap_task = tasks.create().expect("bootstrap task slot");
     tasks
         .set_state(bootstrap_task, task::TaskState::Running)
         .expect("bootstrap task exists");
-    let _ = writeln!(serial, "Task table initialized: {} task.", tasks.len());
+    tasks
 }
 
 fn paint_framebuffer(boot_info: &mut BootInfo) {
@@ -75,7 +81,12 @@ fn paint_framebuffer(boot_info: &mut BootInfo) {
     }
 }
 
-fn run(serial: &mut impl Write) -> ! {
+fn run(serial: &mut impl Write, tasks: task::TaskTable) -> ! {
+    // Keep ownership of the task table in the long-lived kernel runtime. The
+    // scheduler introduced later can consume this same state instead of
+    // reconstructing tasks after boot.
+    let _tasks = tasks;
+
     loop {
         if let Some(key) = nastalli_hal::keyboard::take_key() {
             let _ = writeln!(serial, "Key pressed: {key:?}");
@@ -89,5 +100,14 @@ pub fn panic(info: &core::panic::PanicInfo) -> ! {
     let _ = writeln!(serial, "kernel panic: {info}");
     loop {
         core::hint::spin_loop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn bootstrap_task_table_contains_one_task() {
+        let tasks = super::bootstrap_task_table();
+        assert_eq!(tasks.len(), 1);
     }
 }
