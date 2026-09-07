@@ -1,29 +1,55 @@
-# Documentação da Nastalli OS
+# Nastalli Documentation
 
-Esta documentação é parte do projeto, não um texto separado do código. Ela deve explicar o estado real do sistema, as decisões que levaram a ele, suas limitações e como reproduzir os resultados.
+Nastalli treats documentation as part of the engineering artifact. Public documentation must describe what the code actually does, why important decisions were made, what remains unsupported, and how claims were verified.
 
-## Documentos
+## Project overview
 
-| Documento | Conteúdo |
+| Document | Purpose |
 |---|---|
-| [architecture.md](architecture.md) | Camadas, dependências e fronteiras atuais |
-| [boot.md](boot.md) | Cadeia UEFI → bootloader → kernel e comandos de execução |
-| [progress.md](progress.md) | Diário técnico das versões, mudanças e evidências |
-| [roadmap.md](roadmap.md) | Fases planejadas e critérios de entrada/saída |
-| [unsafe-policy.md](unsafe-policy.md) | Regras para código unsafe e assembly |
-| [security-model.md](security-model.md) | Posse do dispositivo, confiança, chaves e limites de segurança |
-| [input.md](input.md) | Teclado PS/2 e fluxo de input |
-| [tasks.md](tasks.md) | Modelo inicial de tarefas e limites da v0.0.6 |
-| [superpowers/specs/2026-09-06-novaos-v001-design.md](superpowers/specs/2026-09-06-novaos-v001-design.md) | Design aprovado da fundação v0.0.1 |
+| [Architecture](architecture.md) | Current layer boundaries, dependency direction, and long-term architectural direction |
+| [Roadmap](roadmap.md) | Engineering milestones, maturity model, hardware support tiers, and release criteria |
+| [Technical progress](progress.md) | Version-by-version implementation history and validation evidence |
+| [Security and ownership model](security-model.md) | Owner-controlled trust goals, current security state, and threat-model boundaries |
+| [`unsafe` policy](unsafe-policy.md) | Rules for unsafe Rust, assembly, privileged operations, and trust boundaries |
 
-## Como manter
+## Current implementation
 
-Em cada mudança relevante, atualizar:
+| Document | Purpose |
+|---|---|
+| [Boot flow](boot.md) | UEFI → bootloader → kernel chain, image creation, OVMF discovery, and run commands |
+| [Physical memory](memory.md) | Current 4 KiB physical-frame allocator model and invariants |
+| [Kernel heap](heap.md) | Current static 64 KiB kernel heap and its limitations |
+| [Input](input.md) | Current PS/2 keyboard IRQ1 path and supported scancodes |
+| [Task model](tasks.md) | v0.0.6 task identity/state model and persistent runtime ownership |
 
-1. a versão/estado em `README.md`;
-2. a decisão arquitetural afetada em `architecture.md`;
-3. o registro cronológico em `progress.md`;
-4. o documento específico da área, quando houver;
-5. os comandos e resultados de verificação.
+## Design and implementation records
 
-Não registrar como concluído algo que não foi compilado ou executado. Limitações do ambiente devem aparecer explicitamente.
+Longer design specifications and implementation plans live under:
+
+```text
+docs/superpowers/specs/
+docs/superpowers/plans/
+```
+
+The current documentation professionalization design is:
+
+- [Professional roadmap and documentation design](superpowers/specs/2026-09-07-professional-roadmap-and-docs-design.md)
+
+These records explain intent. They do **not** override the current implementation state described by the main documentation.
+
+## Documentation rules
+
+Every meaningful change should consider whether it affects:
+
+1. `README.md` — public status and high-level capabilities;
+2. `architecture.md` — boundaries, dependency direction, and architectural decisions;
+3. `progress.md` — verified implementation evidence;
+4. `roadmap.md` — milestone state or long-term direction;
+5. the relevant subsystem document;
+6. `SECURITY.md` or `security-model.md` when trust or security assumptions change.
+
+A feature must not be marked complete merely because code was written. Claims should be supported by the checks appropriate to that feature: compilation, automated tests, target build, QEMU validation, stress testing, hardware qualification, or security review as maturity increases.
+
+## Current maturity
+
+Nastalli is currently at `v0.0.6`, in early kernel bring-up. The reference environment is x86_64 under QEMU/OVMF. Features listed for later milestones are design direction, not current capabilities.
