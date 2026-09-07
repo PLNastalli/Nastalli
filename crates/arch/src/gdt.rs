@@ -1,26 +1,40 @@
+use core::cell::UnsafeCell;
 use lazy_static::lazy_static;
 use x86_64::VirtAddr;
 use x86_64::structures::gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector};
 use x86_64::structures::tss::TaskStateSegment;
 
 pub(crate) const DOUBLE_FAULT_IST_INDEX: u16 = 0;
+const DOUBLE_FAULT_STACK_SIZE: usize = 4096;
 const KERNEL_INTERRUPT_STACK_SIZE: usize = 16 * 1024;
+
+#[repr(align(16))]
+struct WritableStack<const N: usize>(UnsafeCell<[u8; N]>);
+
+impl<const N: usize> WritableStack<N> {
+    const fn new() -> Self {
+        Self(UnsafeCell::new([0; N]))
+    }
+
+    fn top(&self) -> VirtAddr {
+        let start = self.0.get().cast::<u8>() as u64;
+        VirtAddr::new(start + N as u64)
+    }
+}
+
+// These stacks are written by the CPU while switching privilege levels or
+// entering an IST. UnsafeCell keeps their backing storage in writable memory;
+// Rust never creates shared references to the bytes while the CPU uses them.
+unsafe impl<const N: usize> Sync for WritableStack<N> {}
+
+static DOUBLE_FAULT_STACK: WritableStack<DOUBLE_FAULT_STACK_SIZE> = WritableStack::new();
+static KERNEL_INTERRUPT_STACK: WritableStack<KERNEL_INTERRUPT_STACK_SIZE> = WritableStack::new();
 
 lazy_static! {
     static ref TSS: TaskStateSegment = {
         let mut tss = TaskStateSegment::new();
-
-        static DOUBLE_FAULT_STACK: [u8; 4096] = [0; 4096];
-        let double_fault_stack_start = VirtAddr::from_ptr(&DOUBLE_FAULT_STACK);
-        let double_fault_stack_end = double_fault_stack_start + DOUBLE_FAULT_STACK.len();
-        tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = double_fault_stack_end;
-
-        static KERNEL_INTERRUPT_STACK: [u8; KERNEL_INTERRUPT_STACK_SIZE] =
-            [0; KERNEL_INTERRUPT_STACK_SIZE];
-        let kernel_stack_start = VirtAddr::from_ptr(&KERNEL_INTERRUPT_STACK);
-        let kernel_stack_end = kernel_stack_start + KERNEL_INTERRUPT_STACK.len();
-        tss.privilege_stack_table[0] = kernel_stack_end;
-
+        tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = DOUBLE_FAULT_STACK.top();
+        tss.privilege_stack_table[0] = KERNEL_INTERRUPT_STACK.top();
         tss
     };
     static ref GDT: (GlobalDescriptorTable, Selectors) = {
