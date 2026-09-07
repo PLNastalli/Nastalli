@@ -47,8 +47,9 @@ pub fn init() {
     unsafe {
         let mut pics = PICS.lock();
         pics.initialize();
-        // Keep the PIT configured for the scheduler, but enable only IRQ1 now.
-        pics.write_masks(0b1111_1101, 0xff);
+        // Enable timer IRQ0 and keyboard IRQ1. The timer handler only records
+        // ticks; scheduler policy remains outside interrupt context.
+        pics.write_masks(0b1111_1100, 0xff);
     }
     configure_pit(TIMER_FREQUENCY_HZ);
     x86_64::instructions::interrupts::enable();
