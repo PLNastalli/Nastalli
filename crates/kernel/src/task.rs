@@ -1,8 +1,8 @@
-//! Estruturas mínimas de tarefas do kernel.
+//! Minimal kernel task structures.
 //!
-//! Esta versão descreve identidade e estado, mas não faz escalonamento nem
-//! troca de contexto. A tabela fixa evita depender de uma política de
-//! alocação enquanto a memória virtual ainda está sendo construída.
+//! This version models task identity and state, but does not perform scheduling
+//! or context switching. The fixed-size table avoids depending on a dynamic
+//! task-storage policy while virtual memory and scheduling are still being built.
 
 pub const MAX_TASKS: usize = 16;
 
