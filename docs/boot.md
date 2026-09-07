@@ -1,47 +1,107 @@
-# Fluxo de boot
+# Boot Flow
 
-## Cadeia de execução
+## Execution chain
 
 ```text
-Firmware UEFI
-    ↓
-OVMF no QEMU
-    ↓
-Imagem criada por bootloader 0.11.10
-    ↓
-Entry point em crates/boot
-    ↓
+UEFI firmware
+    |
+    v
+OVMF under QEMU
+    |
+    v
+bootloader 0.11.10 UEFI image
+    |
+    v
+entry point in crates/boot
+    |
+    v
 nastalli_kernel::start(BootInfo)
-    ↓
-Serial, framebuffer, GDT/TSS, IDT, PIC e PIT
+    |
+    +--> serial diagnostics
+    +--> framebuffer access
+    +--> GDT/TSS
+    +--> IDT + PIC/PIT infrastructure
+    +--> memory/heap/task initialization
 ```
 
-O Nastalli OS não possui bootloader próprio. O crate `boot` contém apenas a integração com `bootloader_api` e o ponto de entrada que entrega o `BootInfo` ao kernel.
+Nastalli does not currently implement its own bootloader. The `boot` crate contains the integration with `bootloader_api`, the kernel binary entry point, and binary-level panic integration. Boot policy and ordinary hardware logic should remain outside this crate.
 
 ## Build
 
-`cargo xtask build` executa um build separado para `x86_64-unknown-none` e usa `-Zbuild-std=core,compiler_builtins`. O `xtask` em si continua sendo compilado para o host e usa `std`.
+`cargo xtask build` performs a dedicated kernel build for:
 
-`cargo xtask image` usa `bootloader::UefiBoot` para empacotar o ELF do kernel em `target/nastalli-uefi.img`.
+```text
+x86_64-unknown-none
+```
 
-## Execução
+The current build uses Rust `build-std` support for `core` and `compiler_builtins`. The host-side `xtask` binary itself is compiled for the development host and uses `std`.
 
-O `xtask` procura OVMF nestes caminhos:
+The pinned toolchain is declared in `rust-toolchain.toml`. The current bootloader build also requires `rust-src` and `llvm-tools-preview`.
 
-- `/usr/share/edk2/x64/OVMF.4m.fd`;
-- `/usr/share/edk2/x64/OVMF_CODE.4m.fd`;
-- `/usr/share/edk2-ovmf/x64/OVMF_CODE.fd`;
-- `/usr/share/OVMF/OVMF_CODE.fd`.
+## Image creation
 
-Também é possível definir `NASTALLI_OVMF_CODE`. O display padrão é GTK; para validar apenas a serial, use `NASTALLI_QEMU_DISPLAY=none`.
+```bash
+cargo xtask image
+```
 
-## Contrato BootInfo
+The `xtask` tool uses `bootloader::UefiBoot` to package the kernel ELF into:
 
-O bootloader fornece memória, framebuffer e informações de carregamento. Na v0.0.3, o kernel usa o framebuffer diretamente e lê o mapa de memória para contar frames físicos utilizáveis.
+```text
+target/nastalli-uefi.img
+```
 
-## Limitações atuais
+The image format and boot chain currently depend on `bootloader 0.11.10`.
 
-- Não há Secure Boot com chaves do proprietário ainda.
-- Não há ramdisk, filesystem ou userspace.
-- A imagem depende do bootloader existente e do firmware OVMF.
-- O kernel não retorna ao firmware depois de assumir o controle.
+## Running under QEMU
+
+```bash
+cargo xtask run
+```
+
+`xtask` searches common OVMF locations, including:
+
+- `/usr/share/edk2/x64/OVMF.4m.fd`
+- `/usr/share/edk2/x64/OVMF_CODE.4m.fd`
+- `/usr/share/edk2-ovmf/x64/OVMF_CODE.fd`
+- `/usr/share/OVMF/OVMF_CODE.fd`
+
+A custom OVMF code image can be selected with:
+
+```bash
+NASTALLI_OVMF_CODE=/path/to/OVMF_CODE.fd cargo xtask run
+```
+
+For serial-only/headless validation:
+
+```bash
+NASTALLI_QEMU_DISPLAY=none cargo xtask run
+```
+
+The default display mode is GTK when available through the current QEMU invocation.
+
+## `BootInfo` contract
+
+The bootloader provides `BootInfo`, which currently gives the kernel access to information including the memory map and framebuffer.
+
+In the current kernel:
+
+- the framebuffer is used directly for minimal boot-time drawing;
+- `BootInfo.memory_regions` is inspected by the physical-memory allocator model;
+- the kernel does not replace the bootloader-provided page tables with a full self-managed virtual-memory subsystem yet.
+
+The lifetime and ownership assumptions of bootloader-provided structures must remain explicit whenever future memory-management code begins taking stronger control of address spaces.
+
+## Current limitations
+
+As of `v0.0.6`:
+
+- there is no owner-controlled Secure Boot implementation;
+- there is no initramfs or general boot filesystem;
+- there is no userspace loader in the boot path;
+- the UEFI image depends on the existing Rust bootloader crate and OVMF in the reference environment;
+- the kernel does not return to firmware after taking control;
+- real-hardware boot is not yet a production support claim.
+
+## Verification
+
+Boot-affecting changes should be validated with the applicable host checks plus a target run under QEMU/OVMF. Relevant serial output should be recorded in [`progress.md`](progress.md) when it supports a milestone claim.
