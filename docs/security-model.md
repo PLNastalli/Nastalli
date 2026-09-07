@@ -2,11 +2,11 @@
 
 ## Objetivo
 
-O Nova OS deve ser controlado pelo proprietário da máquina. “Seguro” não significa que o kernel pode impedir o dono de fazer mudanças; significa que os limites de autoridade são explícitos, verificáveis e não dependem de uma autoridade remota do projeto.
+O Nastalli OS deve ser controlado pelo proprietário da máquina. “Seguro” não significa que o kernel pode impedir o dono de fazer mudanças; significa que os limites de autoridade são explícitos, verificáveis e não dependem de uma autoridade remota do projeto.
 
 ## Invariantes desejadas
 
-1. Não existe chave mestra do Nova OS capaz de desbloquear máquinas de usuários.
+1. Não existe chave mestra do Nastalli OS capaz de desbloquear máquinas de usuários.
 2. Não existe telemetria obrigatória ou conta online necessária para inicializar o sistema.
 3. Chaves de Secure Boot, quando usadas, pertencem ao proprietário.
 4. Dados persistentes devem poder ser criptografados com chaves sob controle do proprietário.

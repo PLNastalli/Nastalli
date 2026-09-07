@@ -31,7 +31,7 @@ Capturar teclas básicas no QEMU por IRQ1, mantendo o handler curto e separando 
 - `cargo clippy` com `-D warnings`: aprovado.
 - `cargo xtask build`: kernel x86_64 compilado.
 - `cargo xtask run` no QEMU + OVMF: boot aprovado.
-- Saída observada: `NOVA OS v0.0.5`, `IDT and keyboard IRQ1 initialized.`, `Keyboard input initialized on IRQ1.` e `Physical memory: 30296 usable frames.`
+- Saída observada: `NASTALLI OS v0.0.5`, `IDT and keyboard IRQ1 initialized.`, `Keyboard input initialized on IRQ1.` e `Physical memory: 30296 usable frames.`
 - O QEMU foi encerrado por timeout controlado após a validação, pois o kernel permanece em loop infinito.
 
 ## v0.0.4 — Heap do kernel
@@ -64,7 +64,7 @@ Validação final:
 
 - `cargo xtask build`: kernel x86_64 compilado.
 - `cargo xtask run` no QEMU + OVMF: boot aprovado.
-- Saída observada: `NOVA OS v0.0.4`, `Kernel heap initialized: 64 KiB.` e `Physical memory: 30298 usable frames.`
+- Saída observada: `NASTALLI OS v0.0.4`, `Kernel heap initialized: 64 KiB.` e `Physical memory: 30298 usable frames.`
 - O QEMU foi encerrado por timeout controlado após a validação, pois o kernel permanece em loop infinito.
 
 ## v0.0.3 — Memória física
@@ -93,7 +93,7 @@ Interpretar o mapa de memória do `BootInfo` e disponibilizar frames físicos al
 Saída relevante:
 
 ```text
-NOVA OS v0.0.3
+NASTALLI OS v0.0.3
 IDT, PIC and PIT initialized at 100 Hz.
 Physical memory: 30340 usable frames.
 ```
@@ -113,9 +113,9 @@ Instalar a infraestrutura mínima de exceções x86_64 e interrupções de hardw
 - PIC 8259 remapeado para os vetores 32–47.
 - PIT programado para 100 Hz.
 - Contador atômico de ticks, ainda sem consumidor de scheduling.
-- API mínima `novaos_arch::gdt::init()` e `novaos_arch::interrupts::init()`.
+- API mínima `nastalli_arch::gdt::init()` e `nastalli_arch::interrupts::init()`.
 - Teste do divisor PIT para 100 Hz.
-- `xtask run` com descoberta de OVMF e modo headless via `NOVAOS_QEMU_DISPLAY`.
+- `xtask run` com descoberta de OVMF e modo headless via `NASTALLI_QEMU_DISPLAY`.
 
 ### Decisões
 
@@ -136,7 +136,7 @@ Executado com nightly fixado em `nightly-2025-01-01`:
 - `cargo xtask run` no QEMU + OVMF: boot aprovado e serial mostrou:
 
 ```text
-NOVA OS v0.0.2
+NASTALLI OS v0.0.2
 Architecture: x86_64
 Boot: UEFI
 Kernel initialized successfully.

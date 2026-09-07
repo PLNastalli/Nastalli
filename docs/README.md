@@ -1,4 +1,4 @@
-# Documentação da Nova OS
+# Documentação da Nastalli OS
 
 Esta documentação é parte do projeto, não um texto separado do código. Ela deve explicar o estado real do sistema, as decisões que levaram a ele, suas limitações e como reproduzir os resultados.
 

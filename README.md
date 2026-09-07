@@ -1,4 +1,4 @@
-# Nova OS
+# Nastalli OS
 
 Sistema operacional próprio, escrito principalmente em Rust, começando por x86_64 + UEFI + QEMU. O projeto não é uma distribuição Linux nem uma modificação de outro kernel.
 
@@ -24,12 +24,12 @@ A versão atual entra no kernel Rust `no_std`, inicializa GDT/TSS, IDT, PIC 8259
 
 ```bash
 cargo xtask build   # compila o kernel para x86_64-unknown-none
-cargo xtask image   # cria target/novaos-uefi.img
+cargo xtask image   # cria target/nastalli-uefi.img
 cargo xtask run     # cria a imagem e inicia QEMU
 cargo xtask test    # executa testes host dos crates verificáveis
 ```
 
-Para ambientes headless, use `NOVAOS_QEMU_DISPLAY=none cargo xtask run`.
+Para ambientes headless, use `NASTALLI_QEMU_DISPLAY=none cargo xtask run`.
 
 ## Princípios
 

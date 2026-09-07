@@ -11,18 +11,18 @@ Imagem criada por bootloader 0.11.10
     ↓
 Entry point em crates/boot
     ↓
-novaos_kernel::start(BootInfo)
+nastalli_kernel::start(BootInfo)
     ↓
 Serial, framebuffer, GDT/TSS, IDT, PIC e PIT
 ```
 
-O Nova OS não possui bootloader próprio. O crate `boot` contém apenas a integração com `bootloader_api` e o ponto de entrada que entrega o `BootInfo` ao kernel.
+O Nastalli OS não possui bootloader próprio. O crate `boot` contém apenas a integração com `bootloader_api` e o ponto de entrada que entrega o `BootInfo` ao kernel.
 
 ## Build
 
 `cargo xtask build` executa um build separado para `x86_64-unknown-none` e usa `-Zbuild-std=core,compiler_builtins`. O `xtask` em si continua sendo compilado para o host e usa `std`.
 
-`cargo xtask image` usa `bootloader::UefiBoot` para empacotar o ELF do kernel em `target/novaos-uefi.img`.
+`cargo xtask image` usa `bootloader::UefiBoot` para empacotar o ELF do kernel em `target/nastalli-uefi.img`.
 
 ## Execução
 
@@ -33,7 +33,7 @@ O `xtask` procura OVMF nestes caminhos:
 - `/usr/share/edk2-ovmf/x64/OVMF_CODE.fd`;
 - `/usr/share/OVMF/OVMF_CODE.fd`.
 
-Também é possível definir `NOVAOS_OVMF_CODE`. O display padrão é GTK; para validar apenas a serial, use `NOVAOS_QEMU_DISPLAY=none`.
+Também é possível definir `NASTALLI_OVMF_CODE`. O display padrão é GTK; para validar apenas a serial, use `NASTALLI_QEMU_DISPLAY=none`.
 
 ## Contrato BootInfo
 

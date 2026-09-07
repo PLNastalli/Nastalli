@@ -1,4 +1,4 @@
-# Nova OS v0.0.1 — Design
+# Nastalli OS v0.0.1 — Design
 
 ## Objetivo
 

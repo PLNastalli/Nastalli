@@ -1,8 +1,8 @@
 [package]
-name = "novaos-boot"
+name = "nastalli-boot"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 bootloader_api.workspace = true
-novaos-kernel = { path = "../kernel" }
+nastalli-kernel = { path = "../kernel" }

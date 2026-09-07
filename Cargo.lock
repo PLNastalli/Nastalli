@@ -279,7 +279,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
-name = "novaos-arch"
+name = "nastalli-arch"
 version = "0.0.1"
 dependencies = [
  "lazy_static",
@@ -289,28 +289,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "novaos-boot"
+name = "nastalli-boot"
 version = "0.0.1"
 dependencies = [
  "bootloader_api",
- "novaos-kernel",
+ "nastalli-kernel",
 ]
 
 [[package]]
-name = "novaos-hal"
+name = "nastalli-hal"
 version = "0.0.1"
 dependencies = [
- "novaos-arch",
+ "nastalli-arch",
 ]
 
 [[package]]
-name = "novaos-kernel"
+name = "nastalli-kernel"
 version = "0.0.1"
 dependencies = [
  "bootloader_api",
  "linked_list_allocator",
- "novaos-arch",
- "novaos-hal",
+ "nastalli-arch",
+ "nastalli-hal",
 ]
 
 [[package]]

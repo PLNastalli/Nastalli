@@ -28,7 +28,7 @@ pub fn decode_scancode(scancode: u8) -> Option<Key> {
 }
 
 pub fn take_key() -> Option<Key> {
-    novaos_arch::keyboard::take_scancode().and_then(decode_scancode)
+    nastalli_arch::keyboard::take_scancode().and_then(decode_scancode)
 }
 
 #[cfg(test)]

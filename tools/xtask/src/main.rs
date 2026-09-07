@@ -12,7 +12,7 @@ fn main() -> io::Result<()> {
             "test",
             "--workspace",
             "--exclude",
-            "novaos-boot",
+            "nastalli-boot",
         ]),
         _ => {
             eprintln!("usage: cargo xtask <build|image|run|test>");
@@ -25,7 +25,7 @@ fn build() -> io::Result<()> {
     command("cargo", &[
         "build",
         "-p",
-        "novaos-boot",
+        "nastalli-boot",
         "--target",
         "x86_64-unknown-none",
         "-Zbuild-std=core,compiler_builtins",
@@ -35,8 +35,8 @@ fn build() -> io::Result<()> {
 fn image() -> io::Result<()> {
     build()?;
     let root = workspace_root();
-    let kernel = root.join("target/x86_64-unknown-none/debug/novaos-boot");
-    let out = root.join("target/novaos-uefi.img");
+    let kernel = root.join("target/x86_64-unknown-none/debug/nastalli-boot");
+    let out = root.join("target/nastalli-uefi.img");
     fs::create_dir_all(root.join("target"))?;
     bootloader::UefiBoot::new(&kernel)
         .create_disk_image(&out)
@@ -46,7 +46,7 @@ fn image() -> io::Result<()> {
 }
 
 fn run_qemu() -> io::Result<()> {
-    let image = workspace_root().join("target/novaos-uefi.img");
+    let image = workspace_root().join("target/nastalli-uefi.img");
     if !program_in_path("qemu-system-x86_64") {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
@@ -56,10 +56,10 @@ fn run_qemu() -> io::Result<()> {
     let ovmf = find_ovmf().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "OVMF não encontrado; defina NOVAOS_OVMF_CODE ou instale edk2-ovmf",
+            "OVMF não encontrado; defina NASTALLI_OVMF_CODE ou instale edk2-ovmf",
         )
     })?;
-    let display = env::var("NOVAOS_QEMU_DISPLAY").unwrap_or_else(|_| "gtk".to_owned());
+    let display = env::var("NASTALLI_QEMU_DISPLAY").unwrap_or_else(|_| "gtk".to_owned());
     command("qemu-system-x86_64", &[
         "-bios",
         &ovmf,
@@ -81,7 +81,7 @@ fn program_in_path(program: &str) -> bool {
 }
 
 fn find_ovmf() -> Option<String> {
-    if let Ok(path) = env::var("NOVAOS_OVMF_CODE") {
+    if let Ok(path) = env::var("NASTALLI_OVMF_CODE") {
         return Some(path);
     }
 

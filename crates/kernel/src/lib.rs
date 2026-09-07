@@ -8,14 +8,14 @@ pub mod heap;
 pub mod memory;
 
 pub fn start(boot_info: &'static mut BootInfo) -> ! {
-    let mut serial = novaos_hal::serial::Serial::init();
-    let _ = writeln!(serial, "NOVA OS v0.0.5");
-    let _ = writeln!(serial, "Architecture: {}", novaos_arch::NAME);
+    let mut serial = nastalli_hal::serial::Serial::init();
+    let _ = writeln!(serial, "NASTALLI OS v0.0.5");
+    let _ = writeln!(serial, "Architecture: {}", nastalli_arch::NAME);
     let _ = writeln!(serial, "Boot: UEFI");
     let _ = writeln!(serial, "Kernel initialized successfully.");
 
-    novaos_arch::gdt::init();
-    novaos_arch::interrupts::init();
+    nastalli_arch::gdt::init();
+    nastalli_arch::interrupts::init();
     let _ = writeln!(serial, "IDT and keyboard IRQ1 initialized.");
 
     heap::init();
@@ -50,7 +50,7 @@ pub fn start(boot_info: &'static mut BootInfo) -> ! {
     }
 
     loop {
-        if let Some(key) = novaos_hal::keyboard::take_key() {
+        if let Some(key) = nastalli_hal::keyboard::take_key() {
             let _ = writeln!(serial, "Key pressed: {key:?}");
         }
         core::hint::spin_loop();
@@ -58,7 +58,7 @@ pub fn start(boot_info: &'static mut BootInfo) -> ! {
 }
 
 pub fn panic(info: &core::panic::PanicInfo) -> ! {
-    let mut serial = novaos_hal::serial::Serial::init();
+    let mut serial = nastalli_hal::serial::Serial::init();
     let _ = writeln!(serial, "kernel panic: {info}");
     loop {
         core::hint::spin_loop();

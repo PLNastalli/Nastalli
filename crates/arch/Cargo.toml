@@ -1,5 +1,5 @@
 [package]
-name = "novaos-arch"
+name = "nastalli-arch"
 version.workspace = true
 edition.workspace = true
 
