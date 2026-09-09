@@ -57,3 +57,10 @@ jobs:
             echo "Kernel panic detected during QEMU smoke test"
             exit 1
           fi
+      - name: Upload QEMU smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-smoke-log
+          path: qemu.log
+          if-no-files-found: warn
