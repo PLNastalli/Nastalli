@@ -185,13 +185,16 @@ mod tests {
             super::prepare_kernel_task(stack.0.as_mut_ptr(), stack.0.len(), dummy_entry, argument)
         };
         let frame = unsafe { &*prepared.as_ptr() };
+        let resumed_rsp = stack.0.as_ptr() as u64 + stack.0.len() as u64 - 8;
 
         assert_eq!(frame.instruction_pointer, dummy_entry as usize as u64);
         assert_eq!(frame.rdi, argument as usize as u64);
         assert_ne!(frame.cpu_flags & (1 << 9), 0);
+        assert_eq!(frame.stack_pointer, resumed_rsp);
+        assert_ne!(frame.stack_segment, 0);
         assert_eq!(
             prepared.stack_pointer() + core::mem::size_of::<InterruptContext>() as u64,
-            (stack.0.as_ptr() as u64 + stack.0.len() as u64) - 8
+            resumed_rsp
         );
     }
 
