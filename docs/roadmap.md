@@ -39,20 +39,24 @@ The `v0.0.x` series establishes kernel bring-up and the first userspace boundary
 
 - [x] architecture-level cooperative save/restore of `rsp` and x86_64 callee-saved registers;
 - [x] fresh kernel contexts prepared on independent physical-frame-backed stacks;
-- [x] repeated bootstrap/worker context-switch round trips under QEMU;
-- [x] task objects own saved `Context` and kernel-stack metadata;
+- [x] repeated bootstrap/worker cooperative context-switch round trips under QEMU;
+- [x] task objects own saved execution context and kernel-stack metadata;
 - [x] scheduler `Switch { from, to }` decisions resolve to task-owned contexts;
 - [x] real PIT tick accounting drives repeated scheduler-selected execution switches from normal kernel context;
-- [x] Ring 3 syscall entry/return remains functional after scheduler-managed task switching.
+- [x] Ring 3 syscall entry/return remains functional after scheduler-managed task switching;
+- [x] complete x86_64 interrupt/preemption context covering all 15 GPRs plus `RIP`, `CS`, `RFLAGS`, `RSP`, and `SS`;
+- [x] PIT IRQ-driven Ring 0 preemption that switches live tasks through interrupt return;
+- [x] a non-yielding worker is repeatedly preempted and the bootstrap task resumes under QEMU;
+- [x] Ring 3 syscall/breakpoint validation remains functional after IRQ-driven kernel-task preemption.
 
 These are verified foundations, not completion of `v0.1.0`.
 
 ### Remaining target capabilities
 
-- [ ] architecture trap/interrupt context capable of representing the full interrupted task state;
-- [ ] PIT IRQ-driven preemption that switches live tasks through interrupt return rather than cooperative polling;
+- [ ] per-task Ring 0 privilege-stack ownership and scheduler-controlled TSS `RSP0` selection;
+- [ ] scheduler-managed Ring 3 task execution and repeatable timer preemption;
 - [ ] robust task stack allocation and teardown lifecycle;
-- [ ] repeated preemptive execution of multiple task bodies without corruption;
+- [ ] repeated/stress preemptive execution of multiple task bodies without corruption;
 - [ ] first persistent userspace `init`;
 - [ ] minimal userspace shell;
 - [ ] syscall dispatch required by `init`/shell;
@@ -70,7 +74,7 @@ These are verified foundations, not completion of `v0.1.0`.
 - kernel and userspace stacks remain clearly separated;
 - first userspace `init` and minimal shell execute through documented kernel interfaces;
 - basic termination/reaping works for the supported initial process path;
-- tests document scheduler, trap-frame, context, stack, and privilege invariants;
+- tests document scheduler, interrupt-frame, context, stack, TSS and privilege invariants;
 - README, architecture, task, ABI, progress and roadmap documentation match implementation;
 - full CI, target build and QEMU smoke/stress coverage for the milestone are green;
 - a dedicated **v0.1.0 review pass** finds and fixes release-blocking architecture, dependency, `unsafe`, memory, scheduler, ABI, security and documentation defects before the version is declared complete.

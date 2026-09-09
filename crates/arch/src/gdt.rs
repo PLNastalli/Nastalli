@@ -79,6 +79,10 @@ pub fn kernel_code_selector() -> SegmentSelector {
     GDT.1.code_selector
 }
 
+pub fn kernel_data_selector() -> SegmentSelector {
+    GDT.1.data_selector
+}
+
 pub fn user_selectors() -> (SegmentSelector, SegmentSelector) {
     (GDT.1.user_code_selector, GDT.1.user_data_selector)
 }
@@ -88,8 +92,9 @@ mod tests {
     use x86_64::PrivilegeLevel;
 
     #[test]
-    fn kernel_code_selector_has_ring0_rpl() {
+    fn kernel_selectors_have_ring0_rpl() {
         assert_eq!(super::kernel_code_selector().rpl(), PrivilegeLevel::Ring0);
+        assert_eq!(super::kernel_data_selector().rpl(), PrivilegeLevel::Ring0);
     }
 
     #[test]

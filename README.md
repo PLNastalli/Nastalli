@@ -18,9 +18,9 @@ The current kernel boots through UEFI, enters Rust `no_std`, initializes GDT/TSS
 
 The completed `v0.0.x` foundation maps a minimal user code page and user stack, performs a controlled Ring 0 -> Ring 3 transition, and validates an experimental userspace-to-kernel software-interrupt entry and return path. The current userspace probe invokes vector `0x80`, returns to Ring 3, and then triggers a Ring 3 breakpoint used by QEMU smoke validation. The shared contract lives in the independent `nastalli-abi` crate. This is intentionally an early ABI experiment, not a stable application ABI.
 
-During `v0.1.0` development, Nastalli has progressed from a standalone context-switch proof to **scheduler-managed task execution**. A `Task` now owns its saved CPU `Context` and kernel-stack metadata. Real PIT ticks are consumed by the scheduler policy, `ScheduleDecision::Switch { from, to }` is resolved to those task-owned contexts, and the kernel performs verified bootstrap/worker round trips on independent stacks. The same QEMU boot then continues through the Ring 3 syscall probe, proving that task switching does not regress the privilege-transition path.
+During `v0.1.0` development, Nastalli progressed from cooperative scheduler-managed task execution to a verified **IRQ-driven Ring 0 preemption foundation**. The raw PIT interrupt entry saves all 15 general-purpose registers plus the complete 64-bit interrupt-return frame (`RIP`, `CS`, `RFLAGS`, `RSP`, `SS`), calls scheduler policy, and can return through a different task-owned frame with `iretq`. The reference QEMU smoke test proves that a worker which never yields is preempted, four IRQ-driven task switches occur, the bootstrap task resumes, and the later Ring 3 syscall/breakpoint probe still succeeds.
 
-This is still **not IRQ-driven preemption**. The PIT handler only records ticks; context switches currently occur from normal kernel execution after polling the tick counter. Nastalli also does not yet provide a process model, general syscall dispatcher, executable loading, per-process address spaces, `init`, or a userspace shell.
+This preemption proof currently covers kernel tasks. The Ring 3 probe is not yet a scheduler-managed process, and Nastalli does not yet provide per-task Ring 0 privilege stacks, a process model, general syscall dispatcher, executable loading, per-process address spaces, `init`, or a userspace shell. Those boundaries must be made explicit before enabling general userspace preemption.
 
 Nastalli is **not** a Linux distribution and does not reuse the Linux kernel.
 
@@ -55,9 +55,9 @@ experimental userspace probe
       hardware / privileged CPU state
 ```
 
-`crates/abi` contains the small shared userspace contract. `crates/arch` owns x86_64 privilege transitions, paging, interrupts, and the low-level context-switch mechanism. `crates/kernel` owns task/context lifetime, scheduler policy, memory ownership decisions, and runtime orchestration.
+`crates/abi` contains the small shared userspace contract. `crates/arch` owns x86_64 privilege transitions, paging, interrupts, the complete interrupt/preemption frame, and low-level context-switch mechanisms. `crates/kernel` owns task/context lifetime, scheduler policy, memory ownership decisions, and runtime orchestration.
 
-The long-term direction adds IRQ-driven preemption, processes, virtual memory ownership, a real syscall dispatcher, executable loading, IPC, capabilities, VFS, device management, networking, and broader hardware support. These are roadmap goals and must not be interpreted as currently implemented features.
+The long-term direction adds scheduler-managed Ring 3 execution, per-task privilege stacks, processes, virtual memory ownership, a real syscall dispatcher, executable loading, IPC, capabilities, VFS, device management, networking, and broader hardware support. These are roadmap goals and must not be interpreted as currently implemented features.
 
 See [docs/architecture.md](docs/architecture.md) for the current boundaries and long-term direction.
 

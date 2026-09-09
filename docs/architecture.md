@@ -2,7 +2,7 @@
 
 ## Current state
 
-Nastalli is an experimental Rust operating-system kernel. The current public runtime is `v0.0.9`; `v0.1.0` is under active development and is integrating task execution, scheduling, preemption, and the first persistent userspace.
+Nastalli is an experimental Rust operating-system kernel. The current public runtime is `v0.0.9`; `v0.1.0` is under active development and now includes verified IRQ-driven Ring 0 preemption while building toward the first persistent isolated userspace.
 
 ```text
 userspace probe
@@ -48,9 +48,13 @@ Owns architecture-specific and privileged x86_64 mechanisms:
 - paging helpers required by current mappings;
 - controlled Ring 0 -> Ring 3 transition;
 - Ring 3-callable syscall/breakpoint gates;
-- kernel context construction and context switching.
+- cooperative kernel context construction/switching;
+- complete 64-bit interrupt/preemption frame representation;
+- raw timer entry, register save/restore, and `iretq` preemption return.
 
-The cooperative context-switch primitive preserves `rsp` plus the SysV callee-saved register set (`rbp`, `rbx`, `r12`-`r15`). It deliberately contains assembly and raw stack manipulation that do not belong in scheduler policy.
+The cooperative context-switch primitive preserves `rsp` plus the SysV callee-saved register set (`rbp`, `rbx`, `r12`-`r15`). It remains useful as a separate mechanism but is no longer the mechanism used by the IRQ-driven preemption proof.
+
+`arch::preemption::InterruptContext` represents the 15 general-purpose registers followed by the five-word 64-bit hardware return frame (`RIP`, `CS`, `RFLAGS`, `RSP`, `SS`). Keeping this layout identical to the stack consumed by the assembly entry/`iretq` path is a correctness invariant.
 
 ### `crates/hal`
 
@@ -65,11 +69,11 @@ Owns architecture-independent policy and long-lived runtime state where practica
 - task identity/state/context ownership;
 - kernel-stack metadata;
 - round-robin scheduler policy;
-- conversion of scheduler switch decisions into task-owned context switches;
+- conversion of scheduler switch decisions into cooperative or preemptive task-owned contexts;
 - startup/runtime orchestration;
 - preparation of the experimental Ring 3 path.
 
-`Task` now owns a saved `Context` and optional `KernelStack` metadata. `Scheduler` owns the task table. The scheduler changes runnable state and selects `from/to`; the runtime performs the low-level switch through `arch`.
+`Task` can own cooperative `Context` state, `PreemptionContext` state, and optional `KernelStack` metadata. `Scheduler` owns the task table. The scheduler changes runnable state and selects `from/to`; the architecture layer performs the privileged register/stack transition.
 
 ### `tools/xtask`
 
@@ -97,15 +101,25 @@ nastalli_kernel::start(BootInfo)
     +--> worker Task + independent kernel stack
     +--> Scheduler (5-tick round robin)
     |
-    +--> PIT ticks recorded by IRQ0
+    +--> install timer preemption hook
     |
-    +--> normal kernel code consumes ticks
+    +--> bootstrap spins
     |       |
-    |       +--> scheduler selects worker
-    |       +--> bootstrap -> worker
-    |       +--> scheduler selects bootstrap
-    |       +--> worker -> bootstrap
-    |       +--> repeat one more round trip
+    |       +--> PIT IRQ0
+    |               |
+    |               +--> save 15 GPRs + RIP/CS/RFLAGS/RSP/SS
+    |               +--> scheduler selects worker
+    |               +--> iretq into worker
+    |
+    +--> worker spins forever without yielding
+    |       |
+    |       +--> PIT IRQ0 preempts worker
+    |               +--> save worker frame
+    |               +--> scheduler selects bootstrap
+    |               +--> iretq into bootstrap
+    |
+    +--> repeat until four IRQ-driven switches are observed
+    +--> clear preemption hook
     |
     +--> map Ring 3 code/stack
     +--> iretq to Ring 3
@@ -126,50 +140,65 @@ Scheduler
    +--> TaskTable
           |
           +--> Task 0 (bootstrap)
-          |      +--> saved Context
+          |      +--> saved preemption frame after first IRQ switch
           |
           +--> Task 1 (worker)
-                 +--> saved Context
+                 +--> prepared/saved PreemptionContext
                  +--> KernelStack metadata
 ```
 
-The early scheduler object itself currently resides in a dedicated physical frame so its address remains stable while the active CPU stack changes.
+The early scheduler object itself currently resides in a dedicated physical frame so its address remains stable while execution moves between stacks.
 
 This is a bring-up mechanism, not the final general allocator/lifetime design. Stack freeing, task reaping, dynamic virtual mappings, and resource teardown remain incomplete.
 
 ## Interrupt/preemption boundary
 
-The current execution switches are **driven by real PIT tick accounting but are not IRQ-preemptive**.
+IRQ-driven preemption is now implemented and verified for the current Ring 0 task proof.
 
-IRQ0 currently performs the minimal hardware path: record a tick and acknowledge the PIC. Normal kernel execution later consumes those ticks and invokes scheduler policy.
-
-The existing cooperative `arch::context::switch()` must **not** simply be called from the timer handler. Doing so would save the handler's callee-saved state and handler `rsp`, not the complete CPU state of the interrupted task.
-
-Real preemption therefore requires a separate architecture contract:
+The architecture path is:
 
 ```text
 PIT IRQ0
    |
    v
-interrupt/trap entry
+raw interrupt entry
    |
-   +--> save complete interrupted task state
-   +--> acknowledge interrupt at the correct point
+   +--> CPU supplies RIP/CS/RFLAGS/RSP/SS
+   +--> assembly saves all 15 GPRs
    |
    v
-kernel scheduler policy
+InterruptContext
+   |
+   +--> timer accounting / PIC acknowledgement
+   +--> kernel scheduler policy
    |
    v
 select next runnable task
    |
+   +--> save outgoing frame pointer into Task
+   +--> select incoming task-owned frame
+   |
    v
-restore selected interrupt context
+restore GPRs
    |
    v
 iretq
 ```
 
-The trap-frame format, ownership, privilege transitions, stack selection, and return invariants must be explicit and tested before IRQ-driven context switching is enabled.
+The full five-word hardware frame is mandatory in 64-bit mode. An earlier three-word synthetic frame reached the worker with `RSP = 0` and caused a triple fault. QEMU diagnostics and the kernel ELF localized that failure, and the complete-frame contract is now covered by regression tests.
+
+### Ring 3 preemption boundary
+
+The same frame shape can represent a timer interrupt originating in Ring 3, but **frame shape alone is not enough to make userspace preemption safe**.
+
+The TSS currently points privilege transitions at one shared Ring 0 interrupt stack. If multiple Ring 3 tasks were suspended while their saved frames lived on that same stack, a later privilege transition could overwrite an older task's frame. General Ring 3 scheduling therefore requires:
+
+- an owned Ring 0 privilege stack for every scheduler-managed user task;
+- a controlled architecture API for selecting the active TSS `RSP0` before returning to that task;
+- task/scheduler state that keeps the selected privilege stack and saved user frame alive together;
+- tests proving repeated Ring 3 -> IRQ -> scheduler -> Ring 3 transitions cannot overwrite another task's state.
+
+Until those invariants exist, the current preemption proof remains intentionally Ring 0-only.
 
 ## Current userspace boundary
 
@@ -181,14 +210,14 @@ Nastalli currently proves that it can:
 - return to the same user execution;
 - subsequently enter the kernel through a Ring 3 breakpoint using the TSS privilege stack.
 
-This is not yet a process runtime. The user pages belong to a validation path, not an isolated process/address-space object.
+This is not yet a process runtime. The user pages belong to a validation path, not an isolated process/address-space object, and the probe is not yet owned by the scheduler.
 
 ## Current missing subsystems
 
 Not yet implemented:
 
-- IRQ-driven task preemption;
-- complete interrupted-register/trap-frame storage per task;
+- per-task Ring 0 privilege stacks and dynamic TSS `RSP0` selection;
+- scheduler-managed Ring 3 task preemption;
 - generic task stack allocation/free lifecycle;
 - sleep/wakeup and wait queues;
 - process/thread objects;

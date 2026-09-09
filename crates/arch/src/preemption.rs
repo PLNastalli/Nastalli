@@ -1,7 +1,7 @@
 use core::{arch::global_asm, ptr};
 
 const SAVED_GPRS: usize = 15;
-const CPU_FRAME_WORDS: usize = 3;
+const CPU_FRAME_WORDS: usize = 5;
 const FRAME_WORDS: usize = SAVED_GPRS + CPU_FRAME_WORDS;
 const FRAME_SIZE: usize = FRAME_WORDS * core::mem::size_of::<u64>();
 
@@ -26,6 +26,8 @@ pub struct InterruptContext {
     pub instruction_pointer: u64,
     pub code_segment: u64,
     pub cpu_flags: u64,
+    pub stack_pointer: u64,
+    pub stack_segment: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,12 +105,12 @@ pub(crate) fn timer_entry_address() -> u64 {
     nastalli_timer_interrupt_entry as usize as u64
 }
 
-/// Prepares a Ring 0 interrupt-return frame for a task that has not executed yet.
+/// Prepares the complete 64-bit interrupt-return frame for a fresh Ring 0 task.
 ///
-/// The prepared task starts with interrupts enabled. The frame intentionally models
-/// only same-privilege Ring 0 interrupt return (`RIP`, `CS`, `RFLAGS`); Ring 3
-/// preemption requires the larger privilege-transition frame and is not covered by
-/// this bring-up primitive.
+/// In 64-bit mode interrupt entry saves `RIP`, `CS`, `RFLAGS`, `RSP`, and `SS`
+/// even without a privilege-level change, and `iretq` restores the same five
+/// values. The prepared task starts with interrupts enabled and with a SysV
+/// x86_64-compatible entry stack.
 ///
 /// # Safety
 ///
@@ -127,8 +129,8 @@ pub unsafe fn prepare_kernel_task(
         .expect("preemption stack address overflow");
     let aligned_end = end & !0xf;
 
-    // Leave one word above the iretq frame so the resumed entry observes the
-    // SysV x86_64 function-entry stack alignment (RSP % 16 == 8).
+    // Keep a fake return word below the aligned top so the fresh C-ABI entry
+    // observes RSP % 16 == 8. IRETQ loads this value through the frame's RSP slot.
     let resumed_rsp = aligned_end
         .checked_sub(core::mem::size_of::<u64>())
         .expect("preemption stack too small");
@@ -158,6 +160,8 @@ pub unsafe fn prepare_kernel_task(
             instruction_pointer: entry as usize as u64,
             code_segment: crate::gdt::kernel_code_selector().0 as u64,
             cpu_flags: 0x202,
+            stack_pointer: resumed_rsp as u64,
+            stack_segment: crate::gdt::kernel_data_selector().0 as u64,
         });
     }
 
@@ -178,20 +182,23 @@ mod tests {
     struct AlignedStack([u8; 4096]);
 
     #[test]
-    fn prepared_kernel_task_contains_iret_entry_and_argument() {
+    fn prepared_kernel_task_contains_complete_iret_frame() {
         let mut stack = AlignedStack([0; 4096]);
         let argument = 0x1234usize as *mut ();
         let prepared = unsafe {
             super::prepare_kernel_task(stack.0.as_mut_ptr(), stack.0.len(), dummy_entry, argument)
         };
         let frame = unsafe { &*prepared.as_ptr() };
+        let resumed_rsp = stack.0.as_ptr() as u64 + stack.0.len() as u64 - 8;
 
         assert_eq!(frame.instruction_pointer, dummy_entry as usize as u64);
         assert_eq!(frame.rdi, argument as usize as u64);
         assert_ne!(frame.cpu_flags & (1 << 9), 0);
+        assert_eq!(frame.stack_pointer, resumed_rsp);
+        assert_ne!(frame.stack_segment, 0);
         assert_eq!(
             prepared.stack_pointer() + core::mem::size_of::<InterruptContext>() as u64,
-            (stack.0.as_ptr() as u64 + stack.0.len() as u64) - 8
+            resumed_rsp
         );
     }
 

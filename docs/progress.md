@@ -2,6 +2,79 @@
 
 This file records what was implemented, why it was implemented, and what evidence exists for each milestone. Planned behavior belongs in [`roadmap.md`](roadmap.md); this document is evidence-oriented and should describe only work that actually happened.
 
+## v0.1.0 development — IRQ-driven Ring 0 preemption foundation
+
+### Goal
+
+Move scheduling from cooperative/tick-polled context switching to real timer-interrupt preemption, while preserving explicit task ownership and proving that a task which never yields can be interrupted and later resumed safely.
+
+### Implemented
+
+- `arch::preemption::InterruptContext` represents all 15 x86_64 general-purpose registers plus the complete 64-bit interrupt-return frame: `RIP`, `CS`, `RFLAGS`, `RSP`, and `SS`;
+- the PIT IRQ0 IDT entry uses a raw assembly entry point that saves the interrupted register state before calling Rust scheduler dispatch;
+- the timer dispatcher can return either the interrupted frame or a different task-owned preemption frame;
+- the assembly return path restores the selected register frame and resumes it through `iretq`;
+- `Task` can own a `PreemptionContext` and kernel-stack metadata in addition to the earlier cooperative `Context`;
+- `Scheduler::prepare_preemption_switch` saves the outgoing interrupted frame and selects the incoming task-owned frame;
+- a fresh kernel task can be constructed as a synthetic interrupt-return frame on its own 4 KiB stack;
+- the GDT layer exposes both kernel code and kernel data selectors required by synthetic Ring 0 interrupt frames;
+- the runtime worker never calls `yield` or the cooperative switch; real 100 Hz PIT interrupts force execution away from it;
+- the boot probe requires four IRQ-driven task switches and then continues through the existing Ring 3 syscall and breakpoint validation;
+- failed QEMU smoke runs now preserve `qemu.log` and the kernel ELF as CI diagnostics.
+
+### Failure discovered during integration
+
+The first preemption implementation modeled the hardware portion of the interrupt frame as only `RIP`, `CS`, and `RFLAGS`. The first scheduler switch reached `preemptive_worker`, but its function prologue observed `RSP = 0`; the following stack access caused a page fault, then a double fault, then a triple fault.
+
+The preserved QEMU log and kernel ELF localized the fault to `preemptive_worker+4`. The root cause was the 64-bit interrupt/`iretq` contract: the frame must include `SS:RSP` as well. Expanding the architecture contract from three to five hardware words fixed the fault instead of hiding it behind a trampoline or special-case worker entry.
+
+This is now a regression invariant: fresh preemption frames must contain a nonzero stack segment and the exact resumed stack pointer expected by the SysV x86_64 function-entry convention.
+
+### TDD and CI evidence
+
+The preemption fix was developed with a failing host assertion for `stack_pointer`/`stack_segment` before the complete frame was implemented.
+
+CI #144 passed the complete pipeline after the fix:
+
+- formatting;
+- host tests;
+- `cargo check`;
+- Clippy with warnings denied;
+- `x86_64-unknown-none` kernel build;
+- QEMU/OVMF smoke validation.
+
+The runtime evidence required in one boot is:
+
+```text
+Preemption: worker executed without yielding.
+Preemption: four IRQ-driven task switches observed.
+Preemption: bootstrap resumed twice.
+Ring 3 syscall entered kernel and returned.
+Ring 3 probe reached kernel breakpoint.
+```
+
+This proves real Ring 0 IRQ-driven scheduling on the reference QEMU path and proves that the later privilege-transition probe still works after preemptive task switching.
+
+### Current boundary
+
+This is a **Ring 0 preemption foundation**, not general process preemption. The current Ring 3 probe is not a scheduler-owned task. The TSS also still uses one shared Ring 0 privilege stack, which is insufficient for safely retaining multiple suspended Ring 3 interrupt frames.
+
+Before scheduler-managed Ring 3 preemption is enabled, Nastalli needs explicit per-task privilege-stack ownership and a controlled way to update the active TSS `RSP0` for the task that will enter userspace.
+
+### Remaining v0.1.0 work
+
+- per-task Ring 0 privilege stacks and scheduler-controlled TSS `RSP0` selection;
+- scheduler-managed Ring 3 task execution and preemption;
+- generic stack allocation/free and task teardown lifecycle;
+- repeated preemptive task execution stress coverage;
+- first persistent userspace `init`;
+- minimal userspace shell;
+- syscall dispatch required by the first userspace programs;
+- basic process/task termination and reaping;
+- final repository-wide v0.1.0 architecture, dependency, unsafe, correctness, security and documentation review.
+
+---
+
 ## v0.1.0 development — Scheduler-managed task execution
 
 ### Goal
@@ -35,7 +108,7 @@ Key evidence:
 - CI #123: static/build stages passed while QEMU failed only because the new `Task switch:` runtime markers were intentionally required before the runtime integration existed;
 - main CI #127: formatting, host tests, `cargo check`, Clippy, target build, QEMU/OVMF smoke validation and all task/Ring 3 runtime markers passed.
 
-The runtime evidence required in one boot is:
+The runtime evidence required at that stage was:
 
 ```text
 Task switch: worker entered.
@@ -46,26 +119,13 @@ Ring 3 syscall entered kernel and returned.
 Ring 3 probe reached kernel breakpoint.
 ```
 
-This proves that scheduler-selected task contexts, rather than only a standalone context-switch probe, now drive real CPU execution across independent kernel stacks.
+This proved scheduler-selected task contexts, rather than only a standalone context-switch probe, could drive real CPU execution across independent kernel stacks.
 
-### Important limit: not IRQ-driven preemption yet
+### Historical preemption limit
 
-The current switch path consumes real PIT ticks from normal kernel execution. IRQ0 records ticks and acknowledges the interrupt, but it does not directly switch tasks.
+At this stage the switch path still consumed real PIT ticks from normal kernel execution. IRQ0 recorded ticks and acknowledged the interrupt, but it did not directly switch tasks. Calling the cooperative `arch::context::switch()` inside the PIT handler would have saved the handler context rather than the complete interrupted task state.
 
-The existing cooperative `arch::context::switch()` is intentionally **not** called inside the PIT handler. Doing so would save the interrupt-handler context rather than the complete interrupted task state.
-
-The next preemption slice therefore requires an explicit interrupt/trap-frame representation and an architecture entry/return path capable of saving the interrupted task and restoring the scheduler-selected task through interrupt return.
-
-### Remaining v0.1.0 work
-
-- IRQ-driven preemption with full interrupted task state;
-- generic stack allocation/free and task teardown lifecycle;
-- repeated preemptive task execution stress coverage;
-- first persistent userspace `init`;
-- minimal userspace shell;
-- syscall dispatch required by the first userspace programs;
-- basic process/task termination and reaping;
-- final repository-wide v0.1.0 architecture, dependency, unsafe, correctness, security and documentation review.
+That limitation was intentionally left explicit and was later resolved by the IRQ-driven preemption slice documented above, which introduced a dedicated complete interrupt-frame contract and `iretq`-based task restoration.
 
 ---
 
@@ -211,6 +271,7 @@ Notable maintenance work includes:
 - persistent runtime task ownership;
 - `rust-src` and `llvm-tools-preview` pinned in the toolchain;
 - CI coverage for formatting, host tests, checks, Clippy, target build and QEMU runtime smoke;
+- QEMU failure artifacts containing serial/debug output and the kernel ELF for symbolization;
 - OVMF pflash support using a writable VARS copy under `target/`;
 - public documentation rewritten in English around explicit implementation evidence and limitations.
 
