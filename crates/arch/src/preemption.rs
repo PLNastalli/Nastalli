@@ -141,31 +141,28 @@ pub unsafe fn prepare_kernel_task(
 
     unsafe {
         ptr::write(resumed_rsp as *mut u64, 0);
-        ptr::write(
-            frame_start as *mut InterruptContext,
-            InterruptContext {
-                r15: 0,
-                r14: 0,
-                r13: 0,
-                r12: 0,
-                r11: 0,
-                r10: 0,
-                r9: 0,
-                r8: 0,
-                rbp: 0,
-                rdi: argument as usize as u64,
-                rsi: 0,
-                rdx: 0,
-                rcx: 0,
-                rbx: 0,
-                rax: 0,
-                instruction_pointer: entry as usize as u64,
-                code_segment: crate::gdt::kernel_code_selector().0 as u64,
-                cpu_flags: 0x202,
-                stack_pointer: resumed_rsp as u64,
-                stack_segment: crate::gdt::kernel_data_selector().0 as u64,
-            },
-        );
+        ptr::write(frame_start as *mut InterruptContext, InterruptContext {
+            r15: 0,
+            r14: 0,
+            r13: 0,
+            r12: 0,
+            r11: 0,
+            r10: 0,
+            r9: 0,
+            r8: 0,
+            rbp: 0,
+            rdi: argument as usize as u64,
+            rsi: 0,
+            rdx: 0,
+            rcx: 0,
+            rbx: 0,
+            rax: 0,
+            instruction_pointer: entry as usize as u64,
+            code_segment: crate::gdt::kernel_code_selector().0 as u64,
+            cpu_flags: 0x202,
+            stack_pointer: resumed_rsp as u64,
+            stack_segment: crate::gdt::kernel_data_selector().0 as u64,
+        });
     }
 
     PreemptionContext::new(frame_start as u64)
